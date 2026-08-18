@@ -1,0 +1,2 @@
+{"id":"example-1","prompt":"Explain why a greedy algorithm can fail when it only considers the current maximum."}
+{"id":"example-2","prompt":"Give a concise invariant for an algorithm that repeatedly chooses among competing types."}

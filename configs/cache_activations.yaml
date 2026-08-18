@@ -1,0 +1,33 @@
+seed: 42
+
+model:
+  name: meta-llama/Llama-3.1-8B-Instruct
+  device: auto
+  dtype: auto
+  trust_remote_code: false
+
+dataset:
+  path: HuggingFaceFW/fineweb
+  name: sample-10BT
+  split: train
+  text_column: text
+  max_samples: 100000
+
+tokenization:
+  batch_size: 8
+  max_length: 2048
+  padding_side: right
+
+capture:
+  layer_index: 15
+  layer_path: model.layers
+  token_selection: all
+  shard_size: 100000
+  output_dtype: float32
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: data/activations/${now:%Y-%m-%d}_${now:%H-%M-%S}
+

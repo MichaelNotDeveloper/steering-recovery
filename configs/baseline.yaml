@@ -1,0 +1,49 @@
+data:
+  prompts_path: examples/prompts.jsonl
+  max_prompts: null
+
+model:
+  name: meta-llama/Llama-3.1-8B-Instruct
+  device: auto
+  device_map: null
+  dtype: auto
+  trust_remote_code: false
+
+steering:
+  mode: once_at_start
+  scale: 0.0
+  entropy_threshold: 0.35
+  layer_index: 15
+  layer_path: model.layers
+  vector:
+    path: null
+    key: steering_vector
+
+denoiser:
+  enabled: false
+  checkpoint: null
+
+generation:
+  max_new_tokens: 128
+  num_samples: 10
+  temperature: 0.7
+  top_p: 0.95
+  seed: 42
+
+wandb:
+  enabled: true
+  project: steering-recovery
+  name: null
+  entity: null
+  mode: online
+  tags: [baseline]
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: runs/baselines/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: runs/baseline-sweeps/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}_${hydra.job.override_dirname}
+

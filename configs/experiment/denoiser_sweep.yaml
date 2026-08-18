@@ -1,0 +1,11 @@
+# @package _global_
+
+hydra:
+  sweeper:
+    params:
+      model.width: 512,1024
+      model.depth: 2,4,6
+      training.learning_rate: 0.00005,0.0001,0.0002
+      corruption.gaussian_std_max: 0.25,0.5
+      corruption.steering_probability: 0.25,0.5,0.75
+

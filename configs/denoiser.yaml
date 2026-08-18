@@ -1,0 +1,65 @@
+defaults:
+  - _self_
+  - optional experiment: null
+
+seed: 42
+device: auto
+
+data:
+  path: data/activations
+  key: activations
+  statistics_path: null
+  statistics_batch_size: 4096
+  val_fraction: 0.1
+  num_workers: 0
+
+model:
+  hidden_size: null
+  width: 1024
+  depth: 4
+  expansion: 2
+  dropout: 0.0
+
+corruption:
+  gaussian_std_min: 0.01
+  gaussian_std_max: 0.5
+  steering_probability: 0.5
+  steering_scale_min: 0.1
+  steering_scale_max: 2.0
+  steering_vectors_path: null
+  steering_vectors_key: steering_vectors
+  identity_probability: 0.05
+  bidirectional: true
+
+training:
+  epochs: 10
+  max_steps: null
+  batch_size: 512
+  gradient_accumulation_steps: 1
+  learning_rate: 0.0001
+  weight_decay: 0.01
+  betas: [0.9, 0.95]
+  warmup_ratio: 0.05
+  min_lr_factor: 0.1
+  max_grad_norm: 1.0
+  precision: bf16
+  log_every_steps: 10
+  save_every_steps: 1000
+  validation_batches: null
+
+wandb:
+  enabled: true
+  project: steering-recovery
+  name: null
+  entity: null
+  mode: online
+  tags: [denoiser]
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: runs/denoiser/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: runs/denoiser-sweeps/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}_${hydra.job.override_dirname}

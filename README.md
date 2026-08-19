@@ -22,9 +22,9 @@ conda activate steering-recovery
 
 ```bash
 python collect_hidden_statistics.py \
-  source.layer_index=6 \
+  source.layer_index=5 \
   collection.max_tokens=1000000 \
-  output_path=data/gpt2_layer_6_statistics.pt
+  output_path=data/gpt2_layer_5_statistics.pt
 ```
 
 Сбор идёт с `tqdm`; промежуточные моменты считаются в `float64` алгоритмом
@@ -33,8 +33,8 @@ Chan/Welford без хранения активаций. Затем запуст
 ```bash
 python train_denoiser.py \
   data.streaming.model_name=gpt2 \
-  data.streaming.layer_index=6 \
-  data.statistics_path=data/gpt2_layer_6_statistics.pt \
+  data.streaming.layer_index=5 \
+  data.statistics_path=data/gpt2_layer_5_statistics.pt \
   training.batch_size=512 \
   training.max_steps=10000
 ```
@@ -71,7 +71,7 @@ checkpoint в состоянии нормализатора. `count` — обя�
 python train_denoiser.py \
   data.mode=static \
   data.path=/path/to/activations \
-  data.statistics_path=/path/to/gpt2_layer_6_statistics.pt \
+  data.statistics_path=/path/to/gpt2_layer_5_statistics.pt \
   corruption.steering_vectors_path=/path/to/vectors.pt
 ```
 

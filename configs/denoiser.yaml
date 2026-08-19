@@ -10,7 +10,7 @@ data:
   # Used only when mode=static.
   path: data/activations
   key: activations
-  statistics_path: data/gpt2_layer_6_statistics.pt
+  statistics_path: data/gpt2_layer_5_statistics.pt
   val_fraction: 0.1
   num_workers: 0
   streaming:
@@ -24,7 +24,7 @@ data:
     trust_remote_code: false
     # AutoModel(gpt2) exposes its blocks as h[0..11].
     layer_path: h
-    layer_index: 6
+    layer_index: 5
     max_length: 1024
     text_batch_size: 8
     shuffle_buffer_size: 10000

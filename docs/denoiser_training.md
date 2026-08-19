@@ -45,9 +45,9 @@ embedding логарифма noise level. Она обрабатывает token 
 ```bash
 python collect_hidden_statistics.py \
   source.model_name=gpt2 \
-  source.layer_index=6 \
+  source.layer_index=5 \
   collection.max_tokens=1000000 \
-  output_path=data/gpt2_layer_6_statistics.pt
+  output_path=data/gpt2_layer_5_statistics.pt
 ```
 
 Минимальный запуск обучения:
@@ -58,8 +58,8 @@ python train_denoiser.py \
   data.streaming.dataset_name=Skylion007/openwebtext \
   data.streaming.model_name=gpt2 \
   data.streaming.layer_path=h \
-  data.streaming.layer_index=6 \
-  data.statistics_path=data/gpt2_layer_6_statistics.pt \
+  data.streaming.layer_index=5 \
+  data.statistics_path=data/gpt2_layer_5_statistics.pt \
   corruption.steering_vectors_path=/data/steering_vectors.pt \
   model.width=1024 model.depth=4 \
   training.batch_size=512 training.max_steps=10000 \
@@ -117,7 +117,7 @@ python train_denoiser.py wandb.enabled=false
 python train_denoiser.py -m experiment=denoiser_sweep \
   data.mode=streaming \
   data.streaming.model_name=gpt2 \
-  data.statistics_path=data/gpt2_layer_6_statistics.pt \
+  data.statistics_path=data/gpt2_layer_5_statistics.pt \
   corruption.steering_vectors_path=/data/steering_vectors.pt
 ```
 

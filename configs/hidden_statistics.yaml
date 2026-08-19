@@ -16,7 +16,7 @@ source:
   model_dtype: auto
   trust_remote_code: false
   layer_path: h
-  layer_index: 6
+  layer_index: 5
   max_length: 1024
   text_batch_size: 8
 

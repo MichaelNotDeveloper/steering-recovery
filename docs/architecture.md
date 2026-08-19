@@ -154,16 +154,16 @@ conda activate steering-recovery
 обычный `wandb login`; без сети задайте `wandb.mode=offline`, а для полного
 отключения — `wandb.enabled=false`.
 
-Сбор статистик GPT-2 layer 6:
+Сбор статистик GPT-2 `layer_index=5` (6-й блок):
 
 ```bash
 python collect_hidden_statistics.py \
   source.model_name=gpt2 \
   source.layer_path=h \
-  source.layer_index=6 \
+  source.layer_index=5 \
   collection.max_tokens=1000000 \
   collection.batch_tokens=4096 \
-  output_path=data/gpt2_layer_6_statistics.pt
+  output_path=data/gpt2_layer_5_statistics.pt
 ```
 
 Streaming-обучение на том же слое:
@@ -174,8 +174,8 @@ python train_denoiser.py \
   data.streaming.dataset_name=Skylion007/openwebtext \
   data.streaming.model_name=gpt2 \
   data.streaming.layer_path=h \
-  data.streaming.layer_index=6 \
-  data.statistics_path=data/gpt2_layer_6_statistics.pt \
+  data.streaming.layer_index=5 \
+  data.statistics_path=data/gpt2_layer_5_statistics.pt \
   data.streaming.max_length=1024 \
   data.streaming.text_batch_size=8 \
   training.batch_size=512 \

@@ -3,12 +3,13 @@ from __future__ import annotations
 import logging
 import math
 from collections import defaultdict
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 import torch
 from omegaconf import DictConfig, OmegaConf
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from steering_recovery.checkpoint import save_checkpoint
@@ -16,6 +17,7 @@ from steering_recovery.corruption import OnlineCorruptor
 from steering_recovery.data import (
     ActivationDataset,
     compute_statistics,
+    compute_statistics_from_batches,
     load_tensor,
     split_dataset,
 )
@@ -26,7 +28,13 @@ from steering_recovery.runtime import (
     config_to_dict,
     ensure_output_dir,
     resolve_device,
+    resolve_dtype,
     seed_everything,
+)
+from steering_recovery.streaming_data import (
+    HuggingFaceTextStream,
+    TeacherForcedActivationIterableDataset,
+    load_teacher_forced_source,
 )
 from steering_recovery.tracking import Tracker
 
@@ -87,10 +95,82 @@ def _cosine_schedule(
     return torch.optim.lr_scheduler.LambdaLR(optimizer, factor)
 
 
+def build_streaming_activation_datasets(
+    data_config: DictConfig,
+    training_config: DictConfig,
+    *,
+    device: torch.device,
+    seed: int,
+) -> tuple[
+    TeacherForcedActivationIterableDataset,
+    TeacherForcedActivationIterableDataset | None,
+]:
+    """Build restartable train/validation activation streams.
+
+    The first ``validation_texts`` documents are reserved for validation. The
+    training stream starts after them and is shuffled with a bounded buffer.
+    """
+
+    if training_config.max_steps is None:
+        raise ValueError("training.max_steps is required for streaming data")
+    stream_config = data_config.streaming
+    source_dtype = resolve_dtype(str(stream_config.model_dtype), device)
+    extractor = load_teacher_forced_source(
+        model_name=str(stream_config.model_name),
+        tokenizer_name=stream_config.tokenizer_name,
+        layer_index=int(stream_config.layer_index),
+        layer_path=stream_config.layer_path,
+        max_length=int(stream_config.max_length),
+        device=device,
+        dtype=source_dtype,
+        trust_remote_code=bool(stream_config.trust_remote_code),
+    )
+    validation_texts = int(stream_config.validation_texts)
+    if validation_texts < 0:
+        raise ValueError("data.streaming.validation_texts must be non-negative")
+    train_texts = HuggingFaceTextStream(
+        dataset_name=str(stream_config.dataset_name),
+        dataset_config=stream_config.dataset_config,
+        split=str(stream_config.split),
+        text_column=str(stream_config.text_column),
+        skip_texts=validation_texts,
+        shuffle_buffer_size=int(stream_config.shuffle_buffer_size),
+        seed=seed,
+    )
+    accumulation = int(training_config.gradient_accumulation_steps)
+    train_dataset = TeacherForcedActivationIterableDataset(
+        train_texts,
+        extractor,
+        batch_size=int(training_config.batch_size),
+        text_batch_size=int(stream_config.text_batch_size),
+        max_batches=int(training_config.max_steps) * accumulation,
+    )
+
+    validation_batches = training_config.validation_batches
+    validation_dataset = None
+    if validation_texts > 0 and validation_batches is not None:
+        validation_text_stream = HuggingFaceTextStream(
+            dataset_name=str(stream_config.dataset_name),
+            dataset_config=stream_config.dataset_config,
+            split=str(stream_config.split),
+            text_column=str(stream_config.text_column),
+            limit_texts=validation_texts,
+            seed=seed,
+        )
+        validation_dataset = TeacherForcedActivationIterableDataset(
+            validation_text_stream,
+            extractor,
+            batch_size=int(training_config.batch_size),
+            text_batch_size=int(stream_config.text_batch_size),
+            max_batches=int(validation_batches),
+        )
+    return train_dataset, validation_dataset
+
+
 @torch.no_grad()
 def evaluate_denoiser(
     bundle: DenoiserBundle,
-    loader: DataLoader[torch.Tensor],
+    loader: Iterable[torch.Tensor],
     corruptor: OnlineCorruptor,
     device: torch.device,
     seed: int,
@@ -132,14 +212,49 @@ def train_denoiser(config: DictConfig, output_dir: str | Path) -> dict[str, Any]
     seed_everything(int(config.seed))
     output_dir = ensure_output_dir(output_dir)
     device = resolve_device(str(config.device))
-    dataset = ActivationDataset(config.data.path, key=config.data.key)
-    train_dataset, val_dataset = split_dataset(
-        dataset, float(config.data.val_fraction), int(config.seed)
-    )
+    data_mode = str(config.data.get("mode", "static"))
+    if data_mode == "streaming":
+        train_loader, val_loader = build_streaming_activation_datasets(
+            config.data,
+            config.training,
+            device=device,
+            seed=int(config.seed),
+        )
+        hidden_size = train_loader.hidden_size
+        train_dataset = None
+    elif data_mode == "static":
+        dataset = ActivationDataset(config.data.path, key=config.data.key)
+        train_dataset, val_dataset = split_dataset(
+            dataset, float(config.data.val_fraction), int(config.seed)
+        )
+        hidden_size = dataset.hidden_size
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=int(config.training.batch_size),
+            shuffle=True,
+            num_workers=int(config.data.num_workers),
+            pin_memory=device.type == "cuda",
+            drop_last=False,
+        )
+        val_loader = (
+            DataLoader(
+                val_dataset,
+                batch_size=int(config.training.batch_size),
+                shuffle=False,
+                num_workers=int(config.data.num_workers),
+                pin_memory=device.type == "cuda",
+                drop_last=False,
+            )
+            if val_dataset is not None
+            else None
+        )
+    else:
+        raise ValueError("data.mode must be 'streaming' or 'static'")
+
     expected_hidden = config.model.hidden_size
-    if expected_hidden is not None and int(expected_hidden) != dataset.hidden_size:
+    if expected_hidden is not None and int(expected_hidden) != hidden_size:
         raise ValueError(
-            f"configured hidden size {expected_hidden} differs from data {dataset.hidden_size}"
+            f"configured hidden size {expected_hidden} differs from data {hidden_size}"
         )
 
     statistics_path = config.data.statistics_path
@@ -147,16 +262,23 @@ def train_denoiser(config: DictConfig, output_dir: str | Path) -> dict[str, Any]
         statistics = torch.load(statistics_path, map_location="cpu", weights_only=True)
         mean, std = statistics["mean"], statistics["std"]
     else:
-        LOGGER.info("Computing normalization statistics over the training split")
-        mean, std = compute_statistics(
-            train_dataset,
-            batch_size=int(config.data.statistics_batch_size),
-            num_workers=int(config.data.num_workers),
-        )
+        LOGGER.info("Computing normalization statistics over the training stream")
+        if data_mode == "streaming":
+            statistics_batches = int(config.data.streaming.statistics_batches)
+            mean, std = compute_statistics_from_batches(
+                train_loader, max_batches=statistics_batches
+            )
+        else:
+            assert train_dataset is not None
+            mean, std = compute_statistics(
+                train_dataset,
+                batch_size=int(config.data.statistics_batch_size),
+                num_workers=int(config.data.num_workers),
+            )
     torch.save({"mean": mean, "std": std}, output_dir / "statistics.pt")
     normalizer = ActivationNormalizer(mean, std)
     model = ActivationDenoiser(
-        hidden_size=dataset.hidden_size,
+        hidden_size=hidden_size,
         width=int(config.model.width),
         depth=int(config.model.depth),
         expansion=int(config.model.expansion),
@@ -175,26 +297,6 @@ def train_denoiser(config: DictConfig, output_dir: str | Path) -> dict[str, Any]
         )
     corruptor = _make_corruptor(config.corruption, vectors)
 
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=int(config.training.batch_size),
-        shuffle=True,
-        num_workers=int(config.data.num_workers),
-        pin_memory=device.type == "cuda",
-        drop_last=False,
-    )
-    val_loader = (
-        DataLoader(
-            val_dataset,
-            batch_size=int(config.training.batch_size),
-            shuffle=False,
-            num_workers=int(config.data.num_workers),
-            pin_memory=device.type == "cuda",
-            drop_last=False,
-        )
-        if val_dataset is not None
-        else None
-    )
     optimizer = torch.optim.AdamW(
         bundle.model.parameters(),
         lr=float(config.training.learning_rate),
@@ -239,6 +341,9 @@ def train_denoiser(config: DictConfig, output_dir: str | Path) -> dict[str, Any]
     try:
         for epoch in range(int(config.training.epochs)):
             bundle.train()
+            epoch_setter = getattr(train_loader, "set_epoch", None)
+            if epoch_setter is not None:
+                epoch_setter(epoch)
             progress = tqdm(train_loader, desc=f"epoch {epoch + 1}", dynamic_ncols=True)
             pending = 0
             for batch_index, clean_raw in enumerate(progress):

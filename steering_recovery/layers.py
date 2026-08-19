@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 import torch
 from torch import nn
 
@@ -64,4 +62,3 @@ def replace_first_tensor(output: object, value: torch.Tensor) -> object:
     if isinstance(output, list):
         return [value, *output[1:]]
     raise TypeError(f"cannot replace tensor in {type(output).__name__}")
-

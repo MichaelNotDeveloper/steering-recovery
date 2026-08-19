@@ -3,11 +3,12 @@ from __future__ import annotations
 import bisect
 import math
 from pathlib import Path
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset, Subset, random_split
+from torch.utils.data import DataLoader, Dataset, random_split
 
 
 _TENSOR_SUFFIXES = {".npy", ".pt", ".pth"}
@@ -156,19 +157,18 @@ def split_dataset(
 
 
 @torch.no_grad()
-def compute_statistics(
-    dataset: Dataset[torch.Tensor], batch_size: int = 1024, num_workers: int = 0
+def compute_statistics_from_batches(
+    batches: Iterable[torch.Tensor], max_batches: int | None = None
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Compute population mean/std with a numerically stable parallel update."""
+    """Compute population mean/std over finite or streaming activation batches."""
 
-    loader = DataLoader(
-        dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
-    )
     count = 0
     mean: torch.Tensor | None = None
     m2: torch.Tensor | None = None
-    for batch in loader:
-        values = batch.double().reshape(-1, batch.shape[-1])
+    for batch_index, batch in enumerate(batches):
+        if max_batches is not None and batch_index >= max_batches:
+            break
+        values = batch.detach().cpu().double().reshape(-1, batch.shape[-1])
         batch_count = values.shape[0]
         batch_mean = values.mean(dim=0)
         batch_m2 = ((values - batch_mean) ** 2).sum(dim=0)
@@ -184,3 +184,15 @@ def compute_statistics(
         raise ValueError("cannot compute statistics for an empty dataset")
     variance = (m2 / count).clamp_min(0)
     return mean.float(), variance.sqrt().float()
+
+
+@torch.no_grad()
+def compute_statistics(
+    dataset: Dataset[torch.Tensor], batch_size: int = 1024, num_workers: int = 0
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute population mean/std for a map-style activation dataset."""
+
+    loader = DataLoader(
+        dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
+    )
+    return compute_statistics_from_batches(loader)

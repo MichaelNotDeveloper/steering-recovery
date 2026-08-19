@@ -28,29 +28,41 @@ embedding логарифма noise level. Она обрабатывает token 
 
 ## Подготовка
 
-1. Соберите hidden states ровно того слоя и модели, где будет steering.
-2. Используйте `statistics.pt` от кеширования либо разрешите train script
-   пересчитать статистики только по train split.
-3. Сложите релевантные steering vectors в один tensor `[n_vectors, hidden_size]`.
+1. Выберите GPT-2 block, совпадающий со слоем будущего steering. Для стандартного
+   `gpt2` доступны индексы `0..11`; streaming-конфиг использует путь `h`.
+2. Dataset сам загрузит `Skylion007/openwebtext` с `streaming=True` и будет
+   получать teacher-forced states во время обучения. Предварительный cache не
+   требуется.
+3. Если нужна фиксированная нормализация между sweep jobs, передайте готовый
+   `statistics.pt`; иначе она оценивается по первым `statistics_batches` batches.
+4. Сложите релевантные steering vectors в один tensor `[n_vectors, hidden_size]`.
    Если vectors не заданы, модель обучается только на Gaussian noise.
-4. Проверьте, что `model.hidden_size` (если указан) совпадает с данными.
+5. Проверьте, что `model.hidden_size` (если указан) совпадает с GPT-2 (`768`).
 
 Минимальный запуск:
 
 ```bash
 python train_denoiser.py \
-  data.path=/data/llama-layer15 \
-  data.statistics_path=/data/llama-layer15/statistics.pt \
+  data.mode=streaming \
+  data.streaming.dataset_name=Skylion007/openwebtext \
+  data.streaming.model_name=gpt2 \
+  data.streaming.layer_path=h \
+  data.streaming.layer_index=6 \
   corruption.steering_vectors_path=/data/steering_vectors.pt \
   model.width=1024 model.depth=4 \
-  training.batch_size=512 training.learning_rate=1e-4
+  training.batch_size=512 training.max_steps=10000 \
+  training.learning_rate=1e-4
 ```
+
+В этом запуске каждый элемент train iterator имеет форму `[512, 768]`. Hidden
+states одного текста не обязаны совпадать с границами batch: остаток дополняется
+states следующего текста. Первый настоящий token каждого документа исключается.
 
 Для локального smoke run:
 
 ```bash
 python train_denoiser.py \
-  data.path=/data/small \
+  data.mode=static data.path=/data/small \
   model.width=64 model.depth=2 \
   training.max_steps=20 training.batch_size=16 \
   training.precision=fp32 device=cpu wandb.mode=offline
@@ -90,8 +102,8 @@ python train_denoiser.py wandb.enabled=false
 
 ```bash
 python train_denoiser.py -m experiment=denoiser_sweep \
-  data.path=/data/llama-layer15 \
-  data.statistics_path=/data/llama-layer15/statistics.pt \
+  data.mode=streaming \
+  data.streaming.model_name=gpt2 \
   corruption.steering_vectors_path=/data/steering_vectors.pt
 ```
 
@@ -119,6 +131,10 @@ python train_denoiser.py -m \
 - `step_N.pt` — периодические снимки;
 - `statistics.pt` и `config.yaml` — полный preprocessing и параметры.
 
+В streaming-режиме `statistics.pt` сохраняет оценку, полученную до обучения.
+Чтобы все sweep jobs использовали строго одинаковую нормализацию, сначала
+сохраните один такой файл и затем задайте его через `data.statistics_path`.
+
 Baseline загружает `best.pt` через `denoiser.checkpoint`. Внутри hook raw steering
 delta переводится в нормализованные координаты, по ней вычисляется noise level,
 затем результат возвращается в исходный dtype/device LLM.
@@ -128,4 +144,3 @@ delta переводится в нормализованные координа�
 1. `val/denoised_mse < val/noisy_mse`;
 2. чистые примеры при `identity_probability > 0` почти не меняются;
 3. baseline при `steering.scale=0` совпадает с запуском без hook при одинаковом seed.
-

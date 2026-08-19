@@ -10,6 +10,8 @@ def test_all_primary_configs_compose():
         baseline = compose(config_name="baseline")
         cache = compose(config_name="cache_activations")
     assert denoiser.model.depth > 0
+    assert denoiser.data.mode == "streaming"
+    assert denoiser.data.streaming.dataset_name == "Skylion007/openwebtext"
     assert baseline.steering.mode == "once_at_start"
     assert cache.capture.token_selection in {"last", "all"}
 

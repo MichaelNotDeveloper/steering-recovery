@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 import pytest
 import torch
 from torch import nn
@@ -50,4 +48,3 @@ def test_entropy_policy_is_causal():
 def test_invalid_mode_is_rejected():
     with pytest.raises(ValueError, match="mode"):
         InterventionController("sometimes", scale=1)
-

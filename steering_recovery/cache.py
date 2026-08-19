@@ -19,7 +19,6 @@ from steering_recovery.runtime import (
     seed_everything,
 )
 
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -113,7 +112,7 @@ def _load_text_dataset(config: DictConfig):
     kwargs = {"split": str(config.split)}
     if config.name:
         kwargs["name"] = str(config.name)
-    return load_dataset(str(config.path), **kwargs)
+    return load_dataset(str(config.path), streaming=True, **kwargs)
 
 
 @torch.inference_mode()

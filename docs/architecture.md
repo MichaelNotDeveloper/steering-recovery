@@ -2,10 +2,10 @@
 
 ## Назначение
 
-Проект разделяет подготовку данных, обучение denoiser и генеративные эксперименты.
-Модель языка не является частью trainable-модуля: она нужна только для сбора
-hidden states и baseline-прогонов. Denoiser обучается отдельно и подключается к
-тому же forward hook опционально.
+Проект разделяет streaming-получение данных, обучение denoiser и генеративные
+эксперименты. GPT-2 работает в `eval`/`inference_mode`, не обучается и производит
+teacher-forced hidden states непосредственно во время обучения. Denoiser —
+единственный trainable-модуль и позднее подключается к baseline forward hook.
 
 ## Структура
 
@@ -22,6 +22,7 @@ steering-recovery/
 ├── steering_recovery/
 │   ├── cache.py               # hook и запись .npy shards
 │   ├── data.py                # lazy dataset и статистики
+│   ├── streaming_data.py      # IterableDataset: OpenWebText → GPT-2 → batches
 │   ├── corruption.py          # online-коррупции
 │   ├── denoiser.py            # residual MLP
 │   ├── training.py            # train/validation/checkpoints
@@ -37,10 +38,11 @@ steering-recovery/
 
 ```mermaid
 flowchart LR
-    A["Тексты"] --> B["LLM + hook слоя"]
-    B --> C["Activation shards"]
+    A["Streaming OpenWebText"] --> B["GPT-2 teacher-forced forward"]
+    B --> C["IterableDataset: exact k hidden states"]
     C --> D["Online corruption"]
     D --> E["Denoiser training"]
+    B -. "optional" .-> I["Activation shards"]
     F["Prompts + steering vector"] --> G["Baseline generation"]
     E -->|"optional checkpoint"| G
     G --> H["JSONL + HTML + W&B"]
@@ -48,15 +50,52 @@ flowchart LR
 
 ## Форматы данных
 
-### Активации
+### Streaming teacher-forced dataset
 
+Основной режим — `data.mode=streaming`. Для каждого набора из
+`data.streaming.text_batch_size` документов выполняется один causal forward
+GPT-2 по настоящей последовательности token IDs. Генерация новых token не
+используется: hidden в позиции `t` вычисляется по настоящим токенам вплоть до
+позиции `t` включительно.
+
+Из каждого текста берутся все непаддинговые hidden states, кроме самого первого
+реального token. Это делается по `attention_mask`, поэтому padding не влияет на
+выбор. Однотокенные и пустые тексты не добавляют активаций.
+
+`TeacherForcedActivationIterableDataset` самостоятельно формирует batches:
+
+1. получает очередные тексты из `Skylion007/openwebtext` через
+   `load_dataset(..., streaming=True)`;
+2. извлекает активации выбранного GPT-2 block;
+3. последовательно складывает token states в буфер;
+4. выдаёт tensor строго `[k, hidden_size]`, где
+   `k = training.batch_size`;
+5. переносит остаток к следующему документу; только последний неполный остаток
+   всего stream отбрасывается.
+
+Dataset уже выполняет batching, поэтому train loop итерирует его напрямую.
+При ручном использовании `DataLoader` допустимы только
+`batch_size=None, num_workers=0`: iterator владеет GPT-2 model и не должен
+копироваться в worker processes.
+
+Первые `data.streaming.validation_texts` документов выделяются в стабильный
+validation stream. Training stream начинается после них и перемешивается
+ограниченным буфером `shuffle_buffer_size`; seed меняется с эпохой.
+
+GPT-2 имеет предел контекста 1024. Тексты обрезаются до
+`data.streaming.max_length`, и внутри получившейся последовательности
+загружаются все states кроме первого.
+
+### Статические активации
+
+Режим `data.mode=static` оставлен для воспроизводимых offline-прогонов.
 `data.path` принимает один `.npy`, `.pt`, `.pth` или директорию с shards.
 Каждый tensor должен иметь форму `[..., hidden_size]`; все ведущие измерения
 считаются независимыми примерами. Для `.pt` допустим tensor либо словарь с ключом
-из `data.key` (по умолчанию `activations`). Обычные `.npy` имеют заголовок NumPy
-и читаются через memory map.
+из `data.key` (по умолчанию `activations`). Обычные `.npy` читаются через memory
+map.
 
-`cache_activations.py` создаёт:
+Опциональный `cache_activations.py` создаёт:
 
 - `activations_00000.npy`, ... — shards;
 - `statistics.pt` — `mean` и `std` по координатам;
@@ -94,17 +133,37 @@ conda activate steering-recovery
 обычный `wandb login`; без сети задайте `wandb.mode=offline`, а для полного
 отключения — `wandb.enabled=false`.
 
-Сбор последнего token каждого документа:
+Streaming-обучение на GPT-2 layer 6:
 
 ```bash
-python cache_activations.py \
-  model.name=/models/llama \
-  dataset.path=/datasets/train.jsonl \
-  dataset.name=null dataset.text_column=text \
-  capture.layer_index=15 capture.token_selection=last
+python train_denoiser.py \
+  data.mode=streaming \
+  data.streaming.dataset_name=Skylion007/openwebtext \
+  data.streaming.model_name=gpt2 \
+  data.streaming.layer_path=h \
+  data.streaming.layer_index=6 \
+  data.streaming.max_length=1024 \
+  data.streaming.text_batch_size=8 \
+  training.batch_size=512 \
+  training.max_steps=10000
 ```
 
-Сбор всех непаддинговых token задаётся через `capture.token_selection=all`.
+`AutoModel(gpt2)` предоставляет blocks как `h[0] ... h[11]`; поэтому source
+dataset использует `layer_path=h`. В causal LM baseline те же blocks находятся
+по пути `transformer.h`.
+
+Перед первым optimizer step статистики нормализации оцениваются на
+`data.streaming.statistics_batches` streaming batches. Их можно зафиксировать
+между запусками, передав готовый `data.statistics_path`.
+
+Статический запуск на ранее сохранённых активациях:
+
+```bash
+python train_denoiser.py \
+  data.mode=static \
+  data.path=/data/activations \
+  data.statistics_path=/data/activations/statistics.pt
+```
 
 Baseline без вмешательства и с вмешательством:
 
@@ -166,4 +225,3 @@ python run_baselines.py -m \
 
 Каждый job получает отдельную директорию Hydra. В config результата записаны все
 override, seed и пути к артефактам.
-

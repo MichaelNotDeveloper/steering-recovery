@@ -1,0 +1,35 @@
+seed: 42
+device: auto
+
+dataset:
+  name: Skylion007/openwebtext
+  config: null
+  split: train
+  text_column: text
+  # Keep the validation prefix reserved by configs/denoiser.yaml out of stats.
+  skip_texts: 1024
+  shuffle_buffer_size: 10000
+
+source:
+  model_name: gpt2
+  tokenizer_name: gpt2
+  model_dtype: auto
+  trust_remote_code: false
+  layer_path: h
+  layer_index: 6
+  max_length: 1024
+  text_batch_size: 8
+
+collection:
+  # Exact number of non-padding hidden states after dropping token 0 per text.
+  max_tokens: 1000000
+  # Temporary reduction batch; memory is O(batch_tokens * hidden_size).
+  batch_tokens: 4096
+
+output_path: data/gpt2_layer_${source.layer_index}_statistics.pt
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: runs/hidden-statistics/${now:%Y-%m-%d}/${now:%H-%M-%S}

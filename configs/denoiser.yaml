@@ -10,8 +10,7 @@ data:
   # Used only when mode=static.
   path: data/activations
   key: activations
-  statistics_path: null
-  statistics_batch_size: 4096
+  statistics_path: data/gpt2_layer_6_statistics.pt
   val_fraction: 0.1
   num_workers: 0
   streaming:
@@ -30,7 +29,6 @@ data:
     text_batch_size: 8
     shuffle_buffer_size: 10000
     validation_texts: 1024
-    statistics_batches: 100
 
 model:
   hidden_size: null

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import math
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -16,8 +16,6 @@ from steering_recovery.checkpoint import save_checkpoint
 from steering_recovery.corruption import OnlineCorruptor
 from steering_recovery.data import (
     ActivationDataset,
-    compute_statistics,
-    compute_statistics_from_batches,
     load_tensor,
     split_dataset,
 )
@@ -36,6 +34,7 @@ from steering_recovery.streaming_data import (
     TeacherForcedActivationIterableDataset,
     load_teacher_forced_source,
 )
+from steering_recovery.statistics import load_normalization_statistics
 from steering_recovery.tracking import Tracker
 
 LOGGER = logging.getLogger(__name__)
@@ -93,6 +92,35 @@ def _cosine_schedule(
         return min_factor + (1 - min_factor) * cosine
 
     return torch.optim.lr_scheduler.LambdaLR(optimizer, factor)
+
+
+def _validate_streaming_statistics_source(
+    statistics: Mapping[str, Any], stream_config: DictConfig
+) -> None:
+    source = statistics.get("source")
+    if not isinstance(source, Mapping):
+        raise ValueError(
+            "streaming statistics must include source metadata; regenerate them "
+            "with collect_hidden_statistics.py"
+        )
+    expected = {
+        "model_name": str(stream_config.model_name),
+        "tokenizer_name": str(stream_config.tokenizer_name or stream_config.model_name),
+        "layer_path": stream_config.layer_path,
+        "layer_index": int(stream_config.layer_index),
+        "max_length": int(stream_config.max_length),
+    }
+    mismatches = [
+        f"{key}: statistics={source.get(key)!r}, training={value!r}"
+        for key, value in expected.items()
+        if source.get(key) != value
+    ]
+    if mismatches:
+        raise ValueError(
+            "statistics source does not match the training source ("
+            + "; ".join(mismatches)
+            + ")"
+        )
 
 
 def build_streaming_activation_datasets(
@@ -212,8 +240,16 @@ def train_denoiser(config: DictConfig, output_dir: str | Path) -> dict[str, Any]
     seed_everything(int(config.seed))
     output_dir = ensure_output_dir(output_dir)
     device = resolve_device(str(config.device))
+    statistics_path = config.data.statistics_path
+    if not statistics_path:
+        raise ValueError(
+            "data.statistics_path is required; run collect_hidden_statistics.py "
+            "before training"
+        )
+    mean, std, statistics = load_normalization_statistics(statistics_path)
     data_mode = str(config.data.get("mode", "static"))
     if data_mode == "streaming":
+        _validate_streaming_statistics_source(statistics, config.data.streaming)
         train_loader, val_loader = build_streaming_activation_datasets(
             config.data,
             config.training,
@@ -221,7 +257,6 @@ def train_denoiser(config: DictConfig, output_dir: str | Path) -> dict[str, Any]
             seed=int(config.seed),
         )
         hidden_size = train_loader.hidden_size
-        train_dataset = None
     elif data_mode == "static":
         dataset = ActivationDataset(config.data.path, key=config.data.key)
         train_dataset, val_dataset = split_dataset(
@@ -257,25 +292,11 @@ def train_denoiser(config: DictConfig, output_dir: str | Path) -> dict[str, Any]
             f"configured hidden size {expected_hidden} differs from data {hidden_size}"
         )
 
-    statistics_path = config.data.statistics_path
-    if statistics_path:
-        statistics = torch.load(statistics_path, map_location="cpu", weights_only=True)
-        mean, std = statistics["mean"], statistics["std"]
-    else:
-        LOGGER.info("Computing normalization statistics over the training stream")
-        if data_mode == "streaming":
-            statistics_batches = int(config.data.streaming.statistics_batches)
-            mean, std = compute_statistics_from_batches(
-                train_loader, max_batches=statistics_batches
-            )
-        else:
-            assert train_dataset is not None
-            mean, std = compute_statistics(
-                train_dataset,
-                batch_size=int(config.data.statistics_batch_size),
-                num_workers=int(config.data.num_workers),
-            )
-    torch.save({"mean": mean, "std": std}, output_dir / "statistics.pt")
+    if mean.numel() != hidden_size:
+        raise ValueError(
+            f"statistics hidden size {mean.numel()} differs from data {hidden_size}"
+        )
+    torch.save(statistics, output_dir / "statistics.pt")
     normalizer = ActivationNormalizer(mean, std)
     model = ActivationDenoiser(
         hidden_size=hidden_size,

@@ -1,5 +1,6 @@
 import itertools
 
+import pytest
 import torch
 from omegaconf import OmegaConf
 
@@ -50,14 +51,36 @@ def test_streaming_training_smoke(monkeypatch, tmp_path):
     monkeypatch.setattr(
         training_module, "build_streaming_activation_datasets", fake_builder
     )
+    statistics_path = tmp_path / "statistics.pt"
+    torch.save(
+        {
+            "sum": torch.zeros(6, dtype=torch.float64),
+            "variance": torch.ones(6, dtype=torch.float64),
+            "count": 1,
+            "source": {
+                "model_name": "fake-gpt",
+                "tokenizer_name": "fake-gpt",
+                "layer_path": "h",
+                "layer_index": 0,
+                "max_length": 8,
+            },
+        },
+        statistics_path,
+    )
     config = OmegaConf.create(
         {
             "seed": 3,
             "device": "cpu",
             "data": {
                 "mode": "streaming",
-                "statistics_path": None,
-                "streaming": {"statistics_batches": 1},
+                "statistics_path": str(statistics_path),
+                "streaming": {
+                    "model_name": "fake-gpt",
+                    "tokenizer_name": "fake-gpt",
+                    "layer_path": "h",
+                    "layer_index": 0,
+                    "max_length": 8,
+                },
             },
             "model": {
                 "hidden_size": 6,
@@ -109,3 +132,7 @@ def test_streaming_training_smoke(monkeypatch, tmp_path):
     bundle, metadata = load_checkpoint(output / "last.pt")
     assert bundle.model.config.hidden_size == 6
     assert metadata["step"] == 2
+
+    config.data.streaming.layer_index = 1
+    with pytest.raises(ValueError, match="statistics source does not match"):
+        training_module.train_denoiser(config, tmp_path / "wrong-layer")

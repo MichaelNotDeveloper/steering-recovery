@@ -17,18 +17,53 @@ conda env create -f environment.yaml
 conda activate steering-recovery
 ```
 
-Обучение denoiser напрямую на streaming OpenWebText:
+Сначала соберите статистики GPT-2 hidden states. Лимит считается по реально
+добавленным hidden-токенам (padding и первый токен каждого текста не входят):
+
+```bash
+python collect_hidden_statistics.py \
+  source.layer_index=6 \
+  collection.max_tokens=1000000 \
+  output_path=data/gpt2_layer_6_statistics.pt
+```
+
+Сбор идёт с `tqdm`; промежуточные моменты считаются в `float64` алгоритмом
+Chan/Welford без хранения активаций. Затем запустите обучение:
 
 ```bash
 python train_denoiser.py \
   data.streaming.model_name=gpt2 \
   data.streaming.layer_index=6 \
+  data.statistics_path=data/gpt2_layer_6_statistics.pt \
   training.batch_size=512 \
   training.max_steps=10000
 ```
 
 `training.batch_size` — точное число hidden states, которое `IterableDataset`
 выдаёт за одну итерацию. Неполный остаток переносится между текстами.
+Без корректного `data.statistics_path` обучение завершится с ошибкой до первого
+optimizer step.
+
+## Формат статистик hidden states
+
+Файл сохраняется через `torch.save` как словарь:
+
+```python
+{
+    "format_version": 1,
+    "sum": Tensor[hidden_size],       # float64
+    "variance": Tensor[hidden_size],  # float64, population variance
+    "count": int,                     # число hidden-токенов
+    "source": {...},                  # модель, слой и max_length
+    "dataset": {...},                 # источник текстов
+}
+```
+
+Два вектора должны быть одномерными, одинакового размера и соответствовать
+тому же GPT-2 layer, который используется при обучении. Denoiser вычисляет
+`mean = sum / count` и `std = sqrt(variance)`, после чего сохраняет их внутри
+checkpoint в состоянии нормализатора. `count` — обязательный скаляр: без него
+невозможно восстановить mean из sum.
 
 Опциональный статический режим:
 
@@ -36,7 +71,7 @@ python train_denoiser.py \
 python train_denoiser.py \
   data.mode=static \
   data.path=/path/to/activations \
-  data.statistics_path=/path/to/activations/statistics.pt \
+  data.statistics_path=/path/to/gpt2_layer_6_statistics.pt \
   corruption.steering_vectors_path=/path/to/vectors.pt
 ```
 

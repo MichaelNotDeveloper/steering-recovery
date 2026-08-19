@@ -18,6 +18,7 @@ from steering_recovery.runtime import (
     resolve_dtype,
     seed_everything,
 )
+from steering_recovery.statistics import RunningHiddenStatistics
 
 LOGGER = logging.getLogger(__name__)
 
@@ -151,9 +152,7 @@ def cache_activations(config: DictConfig, output_dir: str | Path) -> dict[str, A
         shard_size=int(config.capture.shard_size),
         dtype=str(config.capture.output_dtype),
     )
-    count = 0
-    running_sum: torch.Tensor | None = None
-    running_square_sum: torch.Tensor | None = None
+    statistics = RunningHiddenStatistics()
     try:
         batch_size = int(config.tokenization.batch_size)
         for start in tqdm(range(0, len(dataset), batch_size), desc="caching"):
@@ -181,31 +180,30 @@ def cache_activations(config: DictConfig, output_dir: str | Path) -> dict[str, A
                 .cpu()
             )
             writer.add(selected)
-            values = selected.double()
-            batch_sum = values.sum(dim=0)
-            batch_square_sum = values.square().sum(dim=0)
-            running_sum = batch_sum if running_sum is None else running_sum + batch_sum
-            running_square_sum = (
-                batch_square_sum
-                if running_square_sum is None
-                else running_square_sum + batch_square_sum
-            )
-            count += len(values)
+            statistics.update(selected)
     finally:
         handle.remove()
     shards = writer.close()
-    if count == 0 or running_sum is None or running_square_sum is None:
-        raise ValueError("no activations were captured")
-    mean = running_sum / count
-    variance = (running_square_sum / count - mean.square()).clamp_min(0)
+    total, variance, count = statistics.finalize()
     torch.save(
-        {"mean": mean.float(), "std": variance.sqrt().float()},
+        {
+            "format_version": 1,
+            "sum": total,
+            "variance": variance,
+            "count": count,
+            "source": {
+                "model_name": str(config.model.name),
+                "layer_path": config.capture.layer_path,
+                "layer_index": int(config.capture.layer_index),
+                "max_length": int(config.tokenization.max_length),
+            },
+        },
         output_dir / "statistics.pt",
     )
     manifest = {
         "format_version": 1,
         "examples": count,
-        "hidden_size": int(mean.numel()),
+        "hidden_size": int(total.numel()),
         "shards": shards,
         "config": config_to_dict(config),
     }

@@ -9,11 +9,14 @@ def test_all_primary_configs_compose():
         denoiser = compose(config_name="denoiser")
         baseline = compose(config_name="baseline")
         cache = compose(config_name="cache_activations")
+        statistics = compose(config_name="hidden_statistics")
     assert denoiser.model.depth > 0
     assert denoiser.data.mode == "streaming"
     assert denoiser.data.streaming.dataset_name == "Skylion007/openwebtext"
     assert baseline.steering.mode == "once_at_start"
     assert cache.capture.token_selection in {"last", "all"}
+    assert statistics.collection.max_tokens > 0
+    assert statistics.output_path.startswith("data/")
 
 
 def test_sweep_config_registers_parameter_grid():

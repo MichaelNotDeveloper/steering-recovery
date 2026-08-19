@@ -12,6 +12,7 @@ teacher-forced hidden states непосредственно во время об
 ```text
 steering-recovery/
 ├── cache_activations.py       # Hydra-entrypoint сбора hidden states
+├── collect_hidden_statistics.py # streaming sum/variance GPT-2 hidden states
 ├── train_denoiser.py          # Hydra-entrypoint обучения
 ├── run_baselines.py           # Hydra-entrypoint генерации
 ├── configs/
@@ -23,6 +24,7 @@ steering-recovery/
 │   ├── cache.py               # hook и запись .npy shards
 │   ├── data.py                # lazy dataset и статистики
 │   ├── streaming_data.py      # IterableDataset: OpenWebText → GPT-2 → batches
+│   ├── statistics.py          # Chan/Welford и загрузка нормализации
 │   ├── corruption.py          # online-коррупции
 │   ├── denoiser.py            # residual MLP
 │   ├── training.py            # train/validation/checkpoints
@@ -86,6 +88,25 @@ GPT-2 имеет предел контекста 1024. Тексты обреза
 `data.streaming.max_length`, и внутри получившейся последовательности
 загружаются все states кроме первого.
 
+### Статистики hidden states
+
+До обучения запускается `collect_hidden_statistics.py`. Он использует тот же
+teacher-forced extractor и останавливается ровно после
+`collection.max_tokens` hidden-токенов. `tqdm` показывает прогресс в этих
+токенах, а не в документах.
+
+Для каждого feature хранятся `sum: float64[hidden_size]` и
+`variance: float64[hidden_size]`, а также скалярный `count`. Внутреннее состояние
+сборщика — `(count, mean, M2)`; батчи объединяются формулами Chan/Welford в
+`float64`. Поэтому код не использует нестабильную формулу
+`E[x²] - E[x]²`, не накапливает большой raw sum на каждом шаге и требует
+`O(hidden_size)` постоянной памяти помимо текущего batch.
+
+При загрузке denoiser получает `mean = sum / count` и
+`std = sqrt(variance)`. Отсутствующий файл, один из ключей, несовпадающий
+`hidden_size` или другая source model/layer считаются ошибкой — online-пересчёта
+во время обучения нет.
+
 ### Статические активации
 
 Режим `data.mode=static` оставлен для воспроизводимых offline-прогонов.
@@ -98,7 +119,7 @@ map.
 Опциональный `cache_activations.py` создаёт:
 
 - `activations_00000.npy`, ... — shards;
-- `statistics.pt` — `mean` и `std` по координатам;
+- `statistics.pt` — устойчиво рассчитанные `sum`, `variance` и `count`;
 - `manifest.json` — размерность, число примеров, список shards и полный config;
 - `config.yaml` — фактически использованная конфигурация.
 
@@ -133,7 +154,19 @@ conda activate steering-recovery
 обычный `wandb login`; без сети задайте `wandb.mode=offline`, а для полного
 отключения — `wandb.enabled=false`.
 
-Streaming-обучение на GPT-2 layer 6:
+Сбор статистик GPT-2 layer 6:
+
+```bash
+python collect_hidden_statistics.py \
+  source.model_name=gpt2 \
+  source.layer_path=h \
+  source.layer_index=6 \
+  collection.max_tokens=1000000 \
+  collection.batch_tokens=4096 \
+  output_path=data/gpt2_layer_6_statistics.pt
+```
+
+Streaming-обучение на том же слое:
 
 ```bash
 python train_denoiser.py \
@@ -142,6 +175,7 @@ python train_denoiser.py \
   data.streaming.model_name=gpt2 \
   data.streaming.layer_path=h \
   data.streaming.layer_index=6 \
+  data.statistics_path=data/gpt2_layer_6_statistics.pt \
   data.streaming.max_length=1024 \
   data.streaming.text_batch_size=8 \
   training.batch_size=512 \
@@ -152,9 +186,8 @@ python train_denoiser.py \
 dataset использует `layer_path=h`. В causal LM baseline те же blocks находятся
 по пути `transformer.h`.
 
-Перед первым optimizer step статистики нормализации оцениваются на
-`data.streaming.statistics_batches` streaming batches. Их можно зафиксировать
-между запусками, передав готовый `data.statistics_path`.
+Модель, слой и `max_length` сборщика должны совпадать с параметрами training
+stream. Файл статистик обязателен и копируется в директорию конкретного run.
 
 Статический запуск на ранее сохранённых активациях:
 

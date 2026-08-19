@@ -1,4 +1,6 @@
 import numpy as np
+import pytest
+import torch
 from omegaconf import OmegaConf
 
 from steering_recovery.checkpoint import load_checkpoint
@@ -7,7 +9,17 @@ from steering_recovery.training import train_denoiser
 
 def test_cpu_training_smoke(tmp_path):
     data_path = tmp_path / "activations.npy"
-    np.save(data_path, np.random.default_rng(4).normal(size=(24, 6)).astype("float32"))
+    values = np.random.default_rng(4).normal(size=(24, 6)).astype("float32")
+    np.save(data_path, values)
+    statistics_path = tmp_path / "statistics.pt"
+    torch.save(
+        {
+            "sum": torch.from_numpy(values).double().sum(dim=0),
+            "variance": torch.from_numpy(values).double().var(dim=0, correction=0),
+            "count": len(values),
+        },
+        statistics_path,
+    )
     config = OmegaConf.create(
         {
             "seed": 3,
@@ -15,8 +27,7 @@ def test_cpu_training_smoke(tmp_path):
             "data": {
                 "path": str(data_path),
                 "key": "activations",
-                "statistics_path": None,
-                "statistics_batch_size": 8,
+                "statistics_path": str(statistics_path),
                 "val_fraction": 0.25,
                 "num_workers": 0,
             },
@@ -70,3 +81,7 @@ def test_cpu_training_smoke(tmp_path):
     bundle, metadata = load_checkpoint(output / "last.pt")
     assert bundle.model.config.hidden_size == 6
     assert metadata["step"] == 2
+
+    config.data.statistics_path = None
+    with pytest.raises(ValueError, match="data.statistics_path is required"):
+        train_denoiser(config, tmp_path / "missing-statistics")

@@ -33,13 +33,24 @@ embedding логарифма noise level. Она обрабатывает token 
 2. Dataset сам загрузит `Skylion007/openwebtext` с `streaming=True` и будет
    получать teacher-forced states во время обучения. Предварительный cache не
    требуется.
-3. Если нужна фиксированная нормализация между sweep jobs, передайте готовый
-   `statistics.pt`; иначе она оценивается по первым `statistics_batches` batches.
+3. Один раз соберите обязательный `statistics.pt` через
+   `collect_hidden_statistics.py`. Он содержит `sum`, `variance` и `count`;
+   online-оценки статистик внутри train loop больше нет.
 4. Сложите релевантные steering vectors в один tensor `[n_vectors, hidden_size]`.
    Если vectors не заданы, модель обучается только на Gaussian noise.
 5. Проверьте, что `model.hidden_size` (если указан) совпадает с GPT-2 (`768`).
 
-Минимальный запуск:
+Сбор статистик с точным лимитом в один миллион hidden-токенов:
+
+```bash
+python collect_hidden_statistics.py \
+  source.model_name=gpt2 \
+  source.layer_index=6 \
+  collection.max_tokens=1000000 \
+  output_path=data/gpt2_layer_6_statistics.pt
+```
+
+Минимальный запуск обучения:
 
 ```bash
 python train_denoiser.py \
@@ -48,6 +59,7 @@ python train_denoiser.py \
   data.streaming.model_name=gpt2 \
   data.streaming.layer_path=h \
   data.streaming.layer_index=6 \
+  data.statistics_path=data/gpt2_layer_6_statistics.pt \
   corruption.steering_vectors_path=/data/steering_vectors.pt \
   model.width=1024 model.depth=4 \
   training.batch_size=512 training.max_steps=10000 \
@@ -63,6 +75,7 @@ states следующего текста. Первый настоящий token 
 ```bash
 python train_denoiser.py \
   data.mode=static data.path=/data/small \
+  data.statistics_path=/data/small-statistics.pt \
   model.width=64 model.depth=2 \
   training.max_steps=20 training.batch_size=16 \
   training.precision=fp32 device=cpu wandb.mode=offline
@@ -104,6 +117,7 @@ python train_denoiser.py wandb.enabled=false
 python train_denoiser.py -m experiment=denoiser_sweep \
   data.mode=streaming \
   data.streaming.model_name=gpt2 \
+  data.statistics_path=data/gpt2_layer_6_statistics.pt \
   corruption.steering_vectors_path=/data/steering_vectors.pt
 ```
 
@@ -131,9 +145,9 @@ python train_denoiser.py -m \
 - `step_N.pt` — периодические снимки;
 - `statistics.pt` и `config.yaml` — полный preprocessing и параметры.
 
-В streaming-режиме `statistics.pt` сохраняет оценку, полученную до обучения.
-Чтобы все sweep jobs использовали строго одинаковую нормализацию, сначала
-сохраните один такой файл и затем задайте его через `data.statistics_path`.
+`statistics.pt` в run-каталоге является копией обязательной входной статистики.
+Все sweep jobs должны получать один и тот же `data.statistics_path`, чтобы
+использовать строго одинаковую нормализацию.
 
 Baseline загружает `best.pt` через `denoiser.checkpoint`. Внутри hook raw steering
 delta переводится в нормализованные координаты, по ней вычисляется noise level,

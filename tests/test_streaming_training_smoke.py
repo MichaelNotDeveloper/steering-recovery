@@ -36,8 +36,7 @@ def test_streaming_training_smoke(monkeypatch, tmp_path):
             extractor,
             batch_size=training_config.batch_size,
             text_batch_size=2,
-            max_batches=training_config.max_steps
-            * training_config.gradient_accumulation_steps,
+            max_batches=training_config.max_steps,
         )
         validation = TeacherForcedActivationIterableDataset(
             InfiniteTexts(),
@@ -84,36 +83,21 @@ def test_streaming_training_smoke(monkeypatch, tmp_path):
             },
             "model": {
                 "hidden_size": 6,
-                "width": 8,
-                "depth": 1,
-                "expansion": 2,
-                "dropout": 0.0,
-            },
-            "corruption": {
-                "gaussian_std_min": 0.1,
-                "gaussian_std_max": 0.2,
-                "steering_probability": 0.0,
-                "steering_scale_min": 0.0,
-                "steering_scale_max": 0.0,
-                "steering_vectors_path": None,
-                "steering_vectors_key": "steering_vectors",
-                "identity_probability": 0.0,
-                "bidirectional": True,
+                "latent_dims": [8],
+                "num_layers": [1],
+                "sigmas": [0.1],
             },
             "training": {
                 "epochs": 1,
                 "max_steps": 2,
                 "batch_size": 4,
-                "gradient_accumulation_steps": 2,
                 "learning_rate": 0.001,
                 "weight_decay": 0.0,
                 "betas": [0.9, 0.95],
-                "warmup_ratio": 0.0,
-                "min_lr_factor": 0.1,
                 "max_grad_norm": 1.0,
                 "precision": "fp32",
-                "log_every_steps": 1,
-                "save_every_steps": 100,
+                "log_every_batches": 1,
+                "validation_every_batches": 1,
                 "validation_batches": 1,
             },
             "wandb": {
@@ -129,7 +113,8 @@ def test_streaming_training_smoke(monkeypatch, tmp_path):
     output = tmp_path / "run"
     result = training_module.train_denoiser(config, output)
     assert result["steps"] == 2
-    bundle, metadata = load_checkpoint(output / "last.pt")
+    model_directory = next((output / "models").iterdir())
+    bundle, metadata = load_checkpoint(model_directory / "last.pt")
     assert bundle.model.config.hidden_size == 6
     assert metadata["step"] == 2
 

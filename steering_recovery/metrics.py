@@ -12,17 +12,24 @@ def denoising_metrics(
     clean = clean.float()
     noisy = noisy.float()
     denoised = denoised.float()
-    noisy_mse = torch.mean((noisy - clean) ** 2)
-    denoised_mse = torch.mean((denoised - clean) ** 2)
+    noisy_l2 = torch.mean((noisy - clean) ** 2)
+    denoised_l2 = torch.mean((denoised - clean) ** 2)
     flat_clean = clean.reshape(clean.shape[0], -1)
+    flat_noisy = noisy.reshape(noisy.shape[0], -1)
     flat_denoised = denoised.reshape(denoised.shape[0], -1)
-    cosine = torch.nn.functional.cosine_similarity(flat_clean, flat_denoised).mean()
-    improvement = 1 - denoised_mse / noisy_mse.clamp_min(1e-12)
+    noisy_cosine_distance = (
+        1 - torch.nn.functional.cosine_similarity(flat_clean, flat_noisy).mean()
+    )
+    denoised_cosine_distance = (
+        1 - torch.nn.functional.cosine_similarity(flat_clean, flat_denoised).mean()
+    )
     return {
-        "noisy_mse": float(noisy_mse.item()),
-        "denoised_mse": float(denoised_mse.item()),
-        "relative_mse_improvement": float(improvement.item()),
-        "cosine_similarity": float(cosine.item()),
+        "l2": float(denoised_l2.item()),
+        "rmse": float(denoised_l2.sqrt().item()),
+        "cosine_distance": float(denoised_cosine_distance.item()),
+        "noisy_l2": float(noisy_l2.item()),
+        "noisy_rmse": float(noisy_l2.sqrt().item()),
+        "noisy_cosine_distance": float(noisy_cosine_distance.item()),
     }
 
 

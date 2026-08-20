@@ -10,7 +10,15 @@ def test_all_primary_configs_compose():
         baseline = compose(config_name="baseline")
         cache = compose(config_name="cache_activations")
         statistics = compose(config_name="hidden_statistics")
-    assert denoiser.model.depth > 0
+    assert list(denoiser.model.latent_dims) == [192, 768, 3072]
+    assert list(denoiser.model.num_layers) == [1, 3, 5]
+    assert list(denoiser.model.sigmas) == [0.1, 0.2, 0.5]
+    assert (
+        len(denoiser.model.latent_dims)
+        * len(denoiser.model.num_layers)
+        * len(denoiser.model.sigmas)
+        == 27
+    )
     assert denoiser.data.mode == "streaming"
     assert denoiser.data.streaming.dataset_name == "Skylion007/openwebtext"
     assert baseline.steering.mode == "once_at_start"
@@ -27,4 +35,4 @@ def test_sweep_config_registers_parameter_grid():
             overrides=["experiment=denoiser_sweep"],
             return_hydra_config=True,
         )
-    assert "model.depth" in config.hydra.sweeper.params
+    assert "training.learning_rate" in config.hydra.sweeper.params

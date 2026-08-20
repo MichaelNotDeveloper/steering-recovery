@@ -6,7 +6,7 @@
 - опциональное кеширование hidden states в `.npy`;
 - baseline-генерация без вмешательства и с режимами `once_at_start`,
   `every_step`, `entropy_threshold`;
-- обучение residual denoiser на Gaussian- и steering-коррупциях;
+- совместное обучение grid residual MLP denoiser на Gaussian noise;
 - Hydra-конфигурации и multirun-перебор гиперпараметров;
 - метрики и артефакты в Weights & Biases.
 
@@ -41,6 +41,8 @@ python train_denoiser.py \
 
 `training.batch_size` — точное число hidden states, которое `IterableDataset`
 выдаёт за одну итерацию. Неполный остаток переносится между текстами.
+На каждом batch обучаются все 27 комбинаций
+`latent_dim=[192,768,3072] × num_layers=[1,3,5] × sigma=[0.1,0.2,0.5]`.
 Без корректного `data.statistics_path` обучение завершится с ошибкой до первого
 optimizer step.
 
@@ -71,8 +73,13 @@ checkpoint в состоянии нормализатора. `count` — обя�
 python train_denoiser.py \
   data.mode=static \
   data.path=/path/to/activations \
-  data.statistics_path=/path/to/gpt2_layer_5_statistics.pt \
-  corruption.steering_vectors_path=/path/to/vectors.pt
+  data.statistics_path=/path/to/gpt2_layer_5_statistics.pt
+```
+
+Сводная таблица и barplot после обучения:
+
+```bash
+python compare_denoisers.py /path/to/run --output-dir comparison
 ```
 
 Baseline без steering:

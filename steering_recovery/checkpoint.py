@@ -23,7 +23,7 @@ def save_checkpoint(
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload: dict[str, Any] = {
-        "format_version": 1,
+        "format_version": 2,
         "model_config": bundle.model_config,
         "model_state": bundle.model.state_dict(),
         "normalizer_state": bundle.normalizer.state_dict(),
@@ -51,8 +51,10 @@ def load_checkpoint(
         payload = torch.load(path, map_location="cpu", weights_only=True)
     except TypeError:
         payload = torch.load(path, map_location="cpu")
-    if payload.get("format_version") != 1:
-        raise ValueError("unsupported denoiser checkpoint format")
+    if payload.get("format_version") != 2:
+        raise ValueError(
+            "unsupported denoiser checkpoint format; retrain the residual MLP grid"
+        )
     model = ActivationDenoiser(**payload["model_config"])
     model.load_state_dict(payload["model_state"])
     normalizer_state = payload["normalizer_state"]

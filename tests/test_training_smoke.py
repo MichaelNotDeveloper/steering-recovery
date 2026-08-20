@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import pytest
 import torch
@@ -33,36 +35,21 @@ def test_cpu_training_smoke(tmp_path):
             },
             "model": {
                 "hidden_size": 6,
-                "width": 8,
-                "depth": 1,
-                "expansion": 2,
-                "dropout": 0.0,
-            },
-            "corruption": {
-                "gaussian_std_min": 0.1,
-                "gaussian_std_max": 0.2,
-                "steering_probability": 0.0,
-                "steering_scale_min": 0.0,
-                "steering_scale_max": 0.0,
-                "steering_vectors_path": None,
-                "steering_vectors_key": "steering_vectors",
-                "identity_probability": 0.0,
-                "bidirectional": True,
+                "latent_dims": [4, 8],
+                "num_layers": [1],
+                "sigmas": [0.1, 0.2],
             },
             "training": {
                 "epochs": 1,
                 "max_steps": 2,
                 "batch_size": 4,
-                "gradient_accumulation_steps": 2,
                 "learning_rate": 0.001,
                 "weight_decay": 0.0,
                 "betas": [0.9, 0.95],
-                "warmup_ratio": 0.0,
-                "min_lr_factor": 0.1,
                 "max_grad_norm": 1.0,
                 "precision": "fp32",
-                "log_every_steps": 1,
-                "save_every_steps": 100,
+                "log_every_batches": 1,
+                "validation_every_batches": 1,
                 "validation_batches": 1,
             },
             "wandb": {
@@ -78,9 +65,24 @@ def test_cpu_training_smoke(tmp_path):
     output = tmp_path / "run"
     result = train_denoiser(config, output)
     assert result["steps"] == 2
-    bundle, metadata = load_checkpoint(output / "last.pt")
-    assert bundle.model.config.hidden_size == 6
-    assert metadata["step"] == 2
+    assert result["models"] == 4
+    model_directories = sorted((output / "models").iterdir())
+    assert len(model_directories) == 4
+    for directory in model_directories:
+        bundle, metadata = load_checkpoint(directory / "best.pt")
+        assert bundle.model.config.hidden_size == 6
+        assert metadata["step"] in {1, 2}
+        assert (directory / "last.pt").is_file()
+        assert (directory / "metrics.jsonl").is_file()
+        assert (directory / "summary.json").is_file()
+        records = [
+            json.loads(line)
+            for line in (directory / "metrics.jsonl").read_text().splitlines()
+        ]
+        assert sum(record["split"] == "validation" for record in records) == 2
+        summary = json.loads((directory / "summary.json").read_text())
+        assert summary["best_validation"]["l2"] >= 0
+    assert (output / "grid_summary.json").is_file()
 
     config.data.statistics_path = None
     with pytest.raises(ValueError, match="data.statistics_path is required"):

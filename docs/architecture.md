@@ -13,6 +13,7 @@ teacher-forced hidden states непосредственно во время об
 steering-recovery/
 ├── cache_activations.py       # Hydra-entrypoint сбора hidden states
 ├── collect_hidden_statistics.py # streaming sum/variance GPT-2 hidden states
+├── compare_denoisers.py       # CSV/Markdown/barplot по model folders
 ├── train_denoiser.py          # Hydra-entrypoint обучения
 ├── run_baselines.py           # Hydra-entrypoint генерации
 ├── configs/
@@ -25,9 +26,9 @@ steering-recovery/
 │   ├── data.py                # lazy dataset и статистики
 │   ├── streaming_data.py      # IterableDataset: OpenWebText → GPT-2 → batches
 │   ├── statistics.py          # Chan/Welford и загрузка нормализации
-│   ├── corruption.py          # online-коррупции
 │   ├── denoiser.py            # residual MLP
 │   ├── training.py            # train/validation/checkpoints
+│   ├── comparison.py          # агрегация сохранённых model summaries
 │   ├── intervention.py        # политики steering
 │   ├── generation.py          # autoregressive loop с KV-cache
 │   ├── baseline.py            # оркестрация baseline
@@ -42,11 +43,12 @@ steering-recovery/
 flowchart LR
     A["Streaming OpenWebText"] --> B["GPT-2 teacher-forced forward"]
     B --> C["IterableDataset: exact k hidden states"]
-    C --> D["Online corruption"]
-    D --> E["Denoiser training"]
+    C --> D["Normalize once"]
+    D --> E["Shared epsilon; sigma 0.1 / 0.2 / 0.5"]
+    E --> J["27 residual MLP models in lockstep"]
     B -. "optional" .-> I["Activation shards"]
     F["Prompts + steering vector"] --> G["Baseline generation"]
-    E -->|"optional checkpoint"| G
+    J -->|"best model checkpoint"| G
     G --> H["JSONL + HTML + W&B"]
 ```
 
@@ -106,6 +108,22 @@ teacher-forced extractor и останавливается ровно после
 `std = sqrt(variance)`. Отсутствующий файл, один из ключей, несовпадающий
 `hidden_size` или другая source model/layer считаются ошибкой — online-пересчёта
 во время обучения нет.
+
+### Grid residual MLP
+
+После общей нормализации один batch используется всеми моделями. Для каждого
+шага создаётся один `epsilon ~ N(0, I)`; варианты получают
+`x_noisy = x + sigma * epsilon` и учатся напрямую восстанавливать `x` по MSE.
+
+Residual block состоит только из
+`Linear(768, latent_dim, bias=True) → GELU → Linear(latent_dim, 768, bias=True)`
+и skip connection. Внутреннего LayerNorm нет. Grid содержит 27 моделей:
+`latent_dim=[192,768,3072]`, `num_layers=[1,3,5]`,
+`sigma=[0.1,0.2,0.5]`.
+
+Validation выполняется каждые `training.validation_every_batches` батчей.
+Каждая модель имеет отдельную папку с `metrics.jsonl`, `summary.json`, лучшим
+`best.pt` по validation L2 и финальным `last.pt`.
 
 ### Статические активации
 
@@ -221,7 +239,14 @@ python run_baselines.py \
   model.name=/models/llama \
   data.prompts_path=/datasets/prompts.jsonl \
   steering.vector.path=/vectors/target.pt steering.scale=1 \
-  denoiser.enabled=true denoiser.checkpoint=/runs/denoiser/best.pt
+  denoiser.enabled=true \
+  denoiser.checkpoint=/runs/denoiser/models/latent_192_layers_1_sigma_0p1/best.pt
+```
+
+Сводная таблица и barplot по всем model folders:
+
+```bash
+python compare_denoisers.py /runs/denoiser/<run> --output-dir comparison
 ```
 
 Режимы вмешательства:

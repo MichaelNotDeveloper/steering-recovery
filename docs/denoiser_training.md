@@ -1,46 +1,47 @@
 # Обучение denoiser
 
-## Что предсказывает модель
+## Задача
 
-Для чистой нормализованной активации `x` online-corruptor строит
-
-```text
-c = sigma * epsilon + m * alpha * v
-x_noisy = x + c
-```
-
-где `epsilon` — Gaussian noise, `v` — RMS-нормированное steering-направление,
-`m` — Bernoulli-маска. Denoiser получает `x_noisy` и фактический RMS corruption
-`sqrt(mean(c²))`, после чего предсказывает именно `c`. Функция потерь:
+Каждый GPT hidden state сначала нормализуется фиксированными статистиками:
 
 ```text
-L = MSE(denoiser(x_noisy, rms(c)), c)
-x_recovered = x_noisy - denoiser(...)
+x = (h - mean) / std
+x_noisy = x + sigma * epsilon,  epsilon ~ N(0, I)
+x_recovered = denoiser(x_noisy)
+loss = mean((x_recovered - x)²)
 ```
 
-Такой target делает нулевую инициализацию последнего слоя корректным стартом:
-до обучения модель оставляет активацию без изменений. `identity_probability`
-добавляет чистые примеры и снижает риск избыточной коррекции.
+Модель предсказывает чистый нормализованный hidden state напрямую. Для каждого
+`sigma` обучается отдельная модель; noise level не передаётся на вход сети.
 
-Архитектура — residual MLP с LayerNorm, gated MLP-блоками и синусоидальным
-embedding логарифма noise level. Она обрабатывает token независимо и поэтому
-применима как к отдельной активации, так и к `[batch, seq, hidden]`.
+## Residual MLP
 
-## Подготовка
+Один блок не содержит внутренней нормализации:
 
-1. Выберите GPT-2 block, совпадающий со слоем будущего steering. Для стандартного
-   `gpt2` доступны индексы `0..11`; streaming-конфиг использует путь `h`.
-2. Dataset сам загрузит `Skylion007/openwebtext` с `streaming=True` и будет
-   получать teacher-forced states во время обучения. Предварительный cache не
-   требуется.
-3. Один раз соберите обязательный `statistics.pt` через
-   `collect_hidden_statistics.py`. Он содержит `sum`, `variance` и `count`;
-   online-оценки статистик внутри train loop больше нет.
-4. Сложите релевантные steering vectors в один tensor `[n_vectors, hidden_size]`.
-   Если vectors не заданы, модель обучается только на Gaussian noise.
-5. Проверьте, что `model.hidden_size` (если указан) совпадает с GPT-2 (`768`).
+```text
+residual = Linear(hidden_size -> latent_dim, bias=True)
+residual = GELU(residual)
+residual = Linear(latent_dim -> hidden_size, bias=True)
+output = input + residual
+```
 
-Сбор статистик с точным лимитом в один миллион hidden-токенов:
+`hidden_size=768` задаётся GPT-2 и не является параметром grid. Внутренняя
+размерность `latent_dim` перебирается как `[192, 768, 3072]`. Полная сетка:
+
+- `latent_dim`: `192`, `768`, `3072`;
+- число residual blocks: `1`, `3`, `5`;
+- `sigma`: `0.1`, `0.2`, `0.5`.
+
+Всего одновременно обучаются 27 независимых моделей. Они находятся в памяти
+одного процесса и обновляются lockstep: train loop получает один новый batch,
+нормализует его один раз, создаёт один `epsilon`, после чего каждая модель
+получает этот же batch и `x + sigma * epsilon`. Так сравнение архитектур не
+зависит от разных текстов или разных реализаций Gaussian noise. Одинаковые
+архитектуры для разных `sigma` также получают одинаковую начальную инициализацию.
+
+## Подготовка и запуск
+
+Сначала соберите статистики того же GPT-2 layer:
 
 ```bash
 python collect_hidden_statistics.py \
@@ -50,111 +51,102 @@ python collect_hidden_statistics.py \
   output_path=data/gpt2_layer_5_statistics.pt
 ```
 
-Минимальный запуск обучения:
+Запуск полного grid:
 
 ```bash
 python train_denoiser.py \
-  data.mode=streaming \
-  data.streaming.dataset_name=Skylion007/openwebtext \
   data.streaming.model_name=gpt2 \
-  data.streaming.layer_path=h \
   data.streaming.layer_index=5 \
   data.statistics_path=data/gpt2_layer_5_statistics.pt \
-  corruption.steering_vectors_path=/data/steering_vectors.pt \
-  model.width=1024 model.depth=4 \
-  training.batch_size=512 training.max_steps=10000 \
-  training.learning_rate=1e-4
+  training.batch_size=512 \
+  training.max_steps=10000 \
+  training.validation_every_batches=100 \
+  training.validation_batches=50
 ```
 
-В этом запуске каждый элемент train iterator имеет форму `[512, 768]`. Hidden
-states одного текста не обязаны совпадать с границами batch: остаток дополняется
-states следующего текста. Первый настоящий token каждого документа исключается.
+Validation запускается каждые `validation_every_batches` train-батчей и ещё раз
+в конце обучения. Для всех моделей используются одинаковые validation batches и
+одинаковый детерминированный `epsilon`.
 
-Для локального smoke run:
+Для небольшого smoke run можно сократить grid:
 
 ```bash
 python train_denoiser.py \
-  data.mode=static data.path=/data/small \
+  data.mode=static \
+  data.path=/data/small \
   data.statistics_path=/data/small-statistics.pt \
-  model.width=64 model.depth=2 \
+  'model.latent_dims=[192]' \
+  'model.num_layers=[1]' \
+  'model.sigmas=[0.1]' \
   training.max_steps=20 training.batch_size=16 \
-  training.precision=fp32 device=cpu wandb.mode=offline
+  training.validation_every_batches=5 \
+  training.precision=fp32 device=cpu wandb.enabled=false
 ```
 
-## W&B
+## Метрики
 
-Train loop отправляет:
+Для noisy input и результата модели считаются:
 
-- `train/loss` — MSE предсказанной corruption;
-- `train/noisy_mse` и `train/denoised_mse`;
-- `train/relative_mse_improvement` — `1 − denoised_mse / noisy_mse`;
-- `train/cosine_similarity` восстановленной и чистой активаций;
-- learning rate, gradient norm и долю steering-примеров.
+- `l2` — MSE между восстановленным и чистым нормализованным hidden;
+- `rmse` — квадратный корень из `l2`;
+- `cosine_distance` — `1 - cosine_similarity(recovered, clean)`;
+- `noisy_l2`, `noisy_rmse`, `noisy_cosine_distance` — те же baseline-метрики
+  между зашумлённым и чистым hidden.
 
-Validation использует отдельный детерминированный generator и те же метрики с
-префиксом `val/`. Для sweep в W&B главным показателем удобно выбрать
-`val/denoised_mse` (минимум), а `val/relative_mse_improvement` использовать как
-диагностику. Отрицательное improvement означает, что denoiser портит активации.
+Лучший checkpoint каждой модели выбирается по минимальному validation `l2`.
+W&B получает метрики с namespace:
 
-Режимы W&B:
+```text
+models/<variant>/train/l2
+models/<variant>/val/l2
+models/<variant>/val/rmse
+models/<variant>/val/cosine_distance
+```
+
+## Результаты
+
+Структура одного запуска:
+
+```text
+run/
+├── config.yaml
+├── statistics.pt
+├── grid_summary.json
+└── models/
+    └── latent_192_layers_1_sigma_0p1/
+        ├── model_config.json
+        ├── metrics.jsonl
+        ├── summary.json
+        ├── best.pt
+        └── last.pt
+```
+
+`best.pt` содержит лучшие веса по validation L2. `last.pt` дополнительно
+содержит optimizer state последнего шага. `metrics.jsonl` хранит всю историю
+train/validation, а `summary.json` — параметры и лучшие validation-метрики.
+Новый прямой denoiser использует checkpoint format version 2; checkpoint старой
+модели, которая предсказывала corruption, с ним несовместим.
+
+## Таблица и barplot
+
+Скрипт рекурсивно проходит по всем `summary.json` под заданной директорией:
 
 ```bash
-# сервер с сетью
-python train_denoiser.py wandb.enabled=true wandb.mode=online
-
-# compute node без исходящего соединения
-python train_denoiser.py wandb.enabled=true wandb.mode=offline
-
-# без W&B
-python train_denoiser.py wandb.enabled=false
+python compare_denoisers.py runs/denoiser/2026-08-20/12-00-00 \
+  --output-dir comparison
 ```
 
-## Hydra sweep
+Он создаёт:
 
-Готовая сетка:
+- `denoiser_comparison.csv`;
+- `denoiser_comparison.md`;
+- `denoiser_comparison.png` — три горизонтальных barplot для L2, RMSE и cosine
+  distance, отсортированные по лучшему validation L2.
+
+Для Hydra-sweep по общим optimizer-параметрам можно дополнительно запустить:
 
 ```bash
-python train_denoiser.py -m experiment=denoiser_sweep \
-  data.mode=streaming \
-  data.streaming.model_name=gpt2 \
-  data.statistics_path=data/gpt2_layer_5_statistics.pt \
-  corruption.steering_vectors_path=/data/steering_vectors.pt
+python train_denoiser.py -m experiment=denoiser_sweep
 ```
 
-Она перебирает width/depth, learning rate, верхнюю Gaussian sigma и вероятность
-steering corruption. Для короткого первого этапа ограничьте budget:
-
-```bash
-python train_denoiser.py -m experiment=denoiser_sweep \
-  training.max_steps=2000 training.validation_batches=100
-```
-
-Собственная сетка без отдельного YAML:
-
-```bash
-python train_denoiser.py -m \
-  model.depth=2,4,6 \
-  training.learning_rate=5e-5,1e-4 \
-  corruption.steering_scale_max=1,2,4
-```
-
-## Чекпоинты и продолжение анализа
-
-- `best.pt` — минимальный `val/loss`;
-- `last.pt` — последняя модель плюс optimizer/scheduler state;
-- `step_N.pt` — периодические снимки;
-- `statistics.pt` и `config.yaml` — полный preprocessing и параметры.
-
-`statistics.pt` в run-каталоге является копией обязательной входной статистики.
-Все sweep jobs должны получать один и тот же `data.statistics_path`, чтобы
-использовать строго одинаковую нормализацию.
-
-Baseline загружает `best.pt` через `denoiser.checkpoint`. Внутри hook raw steering
-delta переводится в нормализованные координаты, по ней вычисляется noise level,
-затем результат возвращается в исходный dtype/device LLM.
-
-Перед большим sweep рекомендуется проверить три инварианта на небольшом наборе:
-
-1. `val/denoised_mse < val/noisy_mse`;
-2. чистые примеры при `identity_probability > 0` почти не меняются;
-3. baseline при `steering.scale=0` совпадает с запуском без hook при одинаковом seed.
+Каждый Hydra job всё равно обучает полную архитектурную сетку на общих батчах.

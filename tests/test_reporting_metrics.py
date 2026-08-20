@@ -1,8 +1,9 @@
 import json
 
 import pytest
+import torch
 
-from steering_recovery.metrics import generation_metrics
+from steering_recovery.metrics import denoising_metrics, generation_metrics
 from steering_recovery.reporting import (
     load_prompt_records,
     write_html_report,
@@ -48,3 +49,16 @@ def test_generation_metrics():
     assert metrics["mean_generated_tokens"] == 2
     assert metrics["mean_normalized_entropy"] == pytest.approx(0.3)
     assert metrics["intervention_rate"] == 0.5
+
+
+def test_denoising_metrics_include_rmse_and_cosine_distance():
+    clean = torch.tensor([[1.0, 0.0]])
+    noisy = torch.tensor([[0.0, 1.0]])
+    metrics = denoising_metrics(clean, noisy, clean)
+
+    assert metrics["l2"] == 0.0
+    assert metrics["rmse"] == 0.0
+    assert metrics["cosine_distance"] == 0.0
+    assert metrics["noisy_l2"] == 1.0
+    assert metrics["noisy_rmse"] == 1.0
+    assert metrics["noisy_cosine_distance"] == 1.0

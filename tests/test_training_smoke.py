@@ -82,6 +82,8 @@ def test_cpu_training_smoke(tmp_path):
         assert sum(record["split"] == "validation" for record in records) == 2
         summary = json.loads((directory / "summary.json").read_text())
         assert summary["best_validation"]["l2"] >= 0
+        assert summary["best_validation"]["score_mse"] >= 0
+        assert summary["best_validation"]["score_rms"] >= 0
     assert (output / "grid_summary.json").is_file()
 
     config.data.statistics_path = None

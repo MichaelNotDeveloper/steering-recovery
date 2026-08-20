@@ -20,8 +20,6 @@ class ComparisonRow:
     noisy_l2: float
     noisy_rmse: float
     noisy_cosine_distance: float
-    score_mse: float | None
-    score_rms: float | None
     summary_path: str
 
     def as_dict(self) -> dict[str, Any]:
@@ -60,12 +58,6 @@ def collect_comparison_rows(root: str | Path) -> list[ComparisonRow]:
                 noisy_l2=float(metrics["noisy_l2"]),
                 noisy_rmse=float(metrics["noisy_rmse"]),
                 noisy_cosine_distance=float(metrics["noisy_cosine_distance"]),
-                score_mse=(
-                    float(metrics["score_mse"]) if "score_mse" in metrics else None
-                ),
-                score_rms=(
-                    float(metrics["score_rms"]) if "score_rms" in metrics else None
-                ),
                 summary_path=str(path),
             )
         )
@@ -76,8 +68,8 @@ def collect_comparison_rows(root: str | Path) -> list[ComparisonRow]:
     )
 
 
-def write_comparison(root: str | Path, output_dir: str | Path) -> dict[str, Any]:
-    """Write tables plus aggregate and per-sigma validation barplots."""
+def write_comparison(root: str | Path, output_dir: str | Path) -> dict[str, str | int]:
+    """Write CSV, Markdown table and a three-panel validation barplot."""
 
     rows = collect_comparison_rows(root)
     output_dir = Path(output_dir).expanduser().resolve()
@@ -93,65 +85,35 @@ def write_comparison(root: str | Path, output_dir: str | Path) -> dict[str, Any]
         writer.writerows(row.as_dict() for row in rows)
 
     markdown_lines = [
-        "| model | latent_dim | layers | sigma | best step | L2 | RMSE | cosine distance | score RMS |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| model | latent_dim | layers | sigma | best step | L2 | RMSE | cosine distance |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in rows:
-        score_rms = f"{row.score_rms:.8g}" if row.score_rms is not None else "n/a"
         markdown_lines.append(
             f"| {row.name} | {row.latent_dim} | {row.num_layers} | "
             f"{row.sigma:g} | {row.best_step} | {row.l2:.8g} | "
-            f"{row.rmse:.8g} | {row.cosine_distance:.8g} | {score_rms} |"
+            f"{row.rmse:.8g} | {row.cosine_distance:.8g} |"
         )
     markdown_path.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
 
-    _write_barplot(rows, plot_path, title="Best denoiser validation metrics")
-    plots_by_sigma: dict[str, str] = {}
-    for sigma in sorted({row.sigma for row in rows}):
-        sigma_key = format(sigma, ".8g")
-        sigma_plot_path = (
-            output_dir / f"denoiser_comparison_sigma_{_sigma_slug(sigma)}.png"
-        )
-        sigma_rows = [row for row in rows if row.sigma == sigma]
-        _write_barplot(
-            sigma_rows,
-            sigma_plot_path,
-            title=f"Best denoiser validation metrics (sigma={sigma:g})",
-            include_sigma_in_labels=False,
-        )
-        plots_by_sigma[sigma_key] = str(sigma_plot_path)
+    _write_barplot(rows, plot_path)
     return {
         "models": len(rows),
         "csv": str(csv_path),
         "markdown": str(markdown_path),
         "plot": str(plot_path),
-        "plots_by_sigma": plots_by_sigma,
-        "score_models": sum(row.score_rms is not None for row in rows),
     }
 
 
-def _sigma_slug(sigma: float) -> str:
-    return format(sigma, ".8g").replace("-", "m").replace(".", "p")
-
-
-def _write_barplot(
-    rows: list[ComparisonRow],
-    path: Path,
-    *,
-    title: str,
-    include_sigma_in_labels: bool = True,
-) -> None:
+def _write_barplot(rows: list[ComparisonRow], path: Path) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    labels = []
-    for row in rows:
-        label = f"L={row.latent_dim}, blocks={row.num_layers}"
-        if include_sigma_in_labels:
-            label += f", σ={row.sigma:g}"
-        labels.append(label)
+    labels = [
+        f"L={row.latent_dim}, blocks={row.num_layers}, σ={row.sigma:g}" for row in rows
+    ]
     colormap = plt.get_cmap("tab10")
     color_by_sigma = {
         sigma: colormap(index % 10)
@@ -159,48 +121,21 @@ def _write_barplot(
     }
     colors = [color_by_sigma[row.sigma] for row in rows]
     figure_height = max(8.0, len(rows) * 0.42)
+    figure, axes = plt.subplots(1, 3, figsize=(20, figure_height), sharey=True)
     panels = [
-        ("Validation L2", [row.l2 for row in rows], "lower is better (log scale)"),
-        (
-            "Validation RMSE",
-            [row.rmse for row in rows],
-            "lower is better (log scale)",
-        ),
-        (
-            "Validation cosine distance",
-            [row.cosine_distance for row in rows],
-            "lower is better (log scale)",
-        ),
+        ("Validation L2", [row.l2 for row in rows]),
+        ("Validation RMSE", [row.rmse for row in rows]),
+        ("Validation cosine distance", [row.cosine_distance for row in rows]),
     ]
-    if all(row.score_rms is not None for row in rows):
-        panels.append(
-            (
-                "Estimated score RMS",
-                [float(row.score_rms) for row in rows],
-                "RMS magnitude (log scale)",
-            )
-        )
-    figure, axes = plt.subplots(
-        1,
-        len(panels),
-        figsize=(6.5 * len(panels), figure_height),
-        sharey=True,
-    )
     positions = list(range(len(rows)))
-    for axis, (panel_title, values, axis_label) in zip(axes, panels, strict=True):
-        if any(value < 0 for value in values):
-            raise ValueError(f"{panel_title} cannot contain negative values")
-        positive_values = [value for value in values if value > 0]
-        log_floor = min(positive_values) * 0.1 if positive_values else 1e-12
-        plotted_values = [value if value > 0 else log_floor for value in values]
-        axis.barh(positions, plotted_values, color=colors)
-        axis.set_title(panel_title)
-        axis.set_xlabel(axis_label)
-        axis.set_xscale("log")
-        axis.grid(axis="x", which="both", alpha=0.25)
+    for axis, (title, values) in zip(axes, panels, strict=True):
+        axis.barh(positions, values, color=colors)
+        axis.set_title(title)
+        axis.set_xlabel("lower is better")
+        axis.grid(axis="x", alpha=0.25)
     axes[0].set_yticks(positions, labels)
     axes[0].invert_yaxis()
-    figure.suptitle(title)
+    figure.suptitle("Best denoiser validation metrics")
     figure.tight_layout()
     figure.savefig(path, dpi=180, bbox_inches="tight")
     plt.close(figure)

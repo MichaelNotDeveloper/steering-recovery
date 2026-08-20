@@ -91,7 +91,32 @@ python train_denoiser.py \
 - `rmse` — квадратный корень из `l2`;
 - `cosine_distance` — `1 - cosine_similarity(recovered, clean)`;
 - `noisy_l2`, `noisy_rmse`, `noisy_cosine_distance` — те же baseline-метрики
-  между зашумлённым и чистым hidden.
+  между зашумлённым и чистым hidden;
+- `score_mse` — средний квадрат прямой оценки score:
+  `mean((denoised - noisy)²) / sigma⁴`;
+- `score_rms` — `sqrt(score_mse)`, то есть RMS-компонента оценки
+  `nabla log p_sigma(noisy)`.
+
+Для `y = x + sigma * epsilon` формула Tweedie имеет вид:
+
+```text
+E[x | y] = y + sigma² * nabla_y log p_sigma(y)
+score_hat(y) = (denoiser(y) - y) / sigma²
+score_rms = sqrt(mean((denoiser(y) - y)²) / sigma⁴)
+```
+
+Нормировать на `sigma⁴` нужно квадрат смещения `denoiser(y) - y`, а не
+reconstruction loss `mean((x - denoiser(y))²)`. В оптимуме покомпонентный
+reconstruction loss связан со score так:
+
+```text
+loss_opt = sigma² - sigma⁴ * E[score(y)²]
+```
+
+После деления смещения на `sigma²` явный масштаб шума сокращается, но
+`p_sigma` — распределение, сглаженное шумом данного уровня, поэтому значение
+score всё равно может зависеть от `sigma`. Для score-метрик требуется
+`sigma > 0`.
 
 Лучший checkpoint каждой модели выбирается по минимальному validation `l2`.
 W&B получает метрики с namespace:
@@ -101,6 +126,8 @@ models/<variant>/train/l2
 models/<variant>/val/l2
 models/<variant>/val/rmse
 models/<variant>/val/cosine_distance
+models/<variant>/val/score_mse
+models/<variant>/val/score_rms
 ```
 
 ## Результаты
@@ -140,8 +167,16 @@ python compare_denoisers.py runs/denoiser/2026-08-20/12-00-00 \
 
 - `denoiser_comparison.csv`;
 - `denoiser_comparison.md`;
-- `denoiser_comparison.png` — три горизонтальных barplot для L2, RMSE и cosine
-  distance, отсортированные по лучшему validation L2.
+- `denoiser_comparison.png` — горизонтальные barplot для L2, RMSE, cosine
+  distance и score RMS, отсортированные по лучшему validation L2;
+- `denoiser_comparison_sigma_<sigma>.png` — отдельный график для
+  каждого уровня шума.
+
+Во всех PNG оси L2, RMSE и cosine distance используют
+логарифмическую шкалу. Score RMS также отображается логарифмически. Старые
+`summary.json`, созданные до добавления `score_mse`/`score_rms`, по-прежнему
+читаются, но score-панель для них недоступна: эту величину нельзя точно
+восстановить только из reconstruction L2.
 
 Для Hydra-sweep по общим optimizer-параметрам можно дополнительно запустить:
 

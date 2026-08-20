@@ -183,8 +183,8 @@ def _create_model_runs(
         raise ValueError("model grid values must be unique")
     if any(value <= 0 for value in latent_dims + layer_counts):
         raise ValueError("latent dimensions and layer counts must be positive")
-    if any(value <= 0 for value in sigmas):
-        raise ValueError("all model.sigmas must be positive")
+    if any(value < 0 for value in sigmas):
+        raise ValueError("all model.sigmas must be non-negative")
 
     runs: list[ModelRun] = []
     for sigma in sigmas:
@@ -308,12 +308,7 @@ def evaluate_model_grid(
                 enabled=autocast_enabled,
             ):
                 recovered = run.bundle.model(noisy)
-            metrics = denoising_metrics(
-                clean,
-                noisy,
-                recovered,
-                noise_std=run.sigma,
-            )
+            metrics = denoising_metrics(clean, noisy, recovered)
             for key, value in metrics.items():
                 totals[run.name][key] += value * batch_size
         total_examples += batch_size
@@ -328,7 +323,6 @@ def evaluate_model_grid(
         }
         metrics["rmse"] = metrics["l2"] ** 0.5
         metrics["noisy_rmse"] = metrics["noisy_l2"] ** 0.5
-        metrics["score_rms"] = metrics["score_mse"] ** 0.5
         results[run.name] = metrics
     return results
 
@@ -524,12 +518,7 @@ def train_denoiser(config: DictConfig, output_dir: str | Path) -> dict[str, Any]
                     run.optimizer.step()
                     mean_l2 += float(loss.item())
                     if should_log:
-                        metrics = denoising_metrics(
-                            clean,
-                            noisy,
-                            recovered.detach(),
-                            noise_std=run.sigma,
-                        )
+                        metrics = denoising_metrics(clean, noisy, recovered.detach())
                         record = {
                             "split": "train",
                             "step": global_step,

@@ -82,6 +82,10 @@ python train_denoiser.py \
 python compare_denoisers.py /path/to/run --output-dir comparison
 ```
 
+Скрипт сохраняет общий barplot и отдельный PNG для каждого
+`sigma`; все оси метрик логарифмические. Новые запуски также отображают
+`score_rms = sqrt(mean((denoised - noisy)²) / sigma⁴)`.
+
 Baseline без steering:
 
 ```bash

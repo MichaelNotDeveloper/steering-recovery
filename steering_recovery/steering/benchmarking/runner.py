@@ -17,12 +17,17 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
-from steering_recovery.checkpoint import load_checkpoint
+from steering_recovery.checkpoint import (
+    load_checkpoint,
+    validate_gpt2_small_denoiser_precision,
+)
 from steering_recovery.runtime import (
     config_to_dict,
     ensure_output_dir,
+    is_gpt2_small_model,
     resolve_device,
     resolve_dtype,
+    resolve_model_dtype,
     seed_everything,
 )
 from steering_recovery.steering.benchmarking.data import (
@@ -73,6 +78,22 @@ class Condition:
     @property
     def condition_id(self) -> str:
         return f"{self.method.name}__{self.vector.slug}__{self.alpha_slug}"
+
+
+def validate_gpt2_small_vector_precision(
+    payload: Mapping[str, Any], *, source_model_name: str
+) -> None:
+    """Reject steering vectors extracted from reduced-precision GPT-2 states."""
+
+    if not is_gpt2_small_model(source_model_name):
+        return
+    metadata = payload.get("metadata")
+    source = metadata.get("source") if isinstance(metadata, Mapping) else None
+    if not isinstance(source, Mapping) or source.get("model_dtype") != "float32":
+        raise ValueError(
+            "GPT-2 Small benchmark requires steering vectors generated in "
+            "float32; regenerate the configured vector artifact"
+        )
 
 
 def _safe_torch_load(path: Path) -> dict[str, Any]:
@@ -265,13 +286,18 @@ def run_steering_benchmark(
     output_dir = ensure_output_dir(output_dir)
     OmegaConf.save(config, output_dir / "config.yaml")
     device = resolve_device(str(config.device))
-    generation_dtype = resolve_dtype(str(config.model.dtype), device)
+    generation_dtype = resolve_model_dtype(
+        str(config.model.name), str(config.model.dtype), device
+    )
     class_indices = {
         str(key): int(value)
         for key, value in config_to_dict(config.classifier.class_indices).items()
     }
     vectors, vector_payload = load_steering_vectors(
         config.steering_vectors_path, class_indices
+    )
+    validate_gpt2_small_vector_precision(
+        vector_payload, source_model_name=str(config.model.name)
     )
     methods = parse_methods(config.methods)
     alphas = [float(value) for value in config.alphas]
@@ -361,10 +387,13 @@ def run_steering_benchmark(
         for method in methods:
             denoiser = None
             if method.denoiser_checkpoint is not None:
-                denoiser, _ = load_checkpoint(
+                denoiser, denoiser_metadata = load_checkpoint(
                     method.denoiser_checkpoint,
                     device=device,
                     dtype=generation_dtype,
+                )
+                validate_gpt2_small_denoiser_precision(
+                    denoiser_metadata, source_model_name=str(config.model.name)
                 )
             for condition in [item for item in conditions if item.method == method]:
                 path = _condition_path(output_dir, condition)
@@ -465,6 +494,8 @@ def run_steering_benchmark(
     classifier_metadata: dict[str, Any] = {}
     if classifier_needed:
         metric_dtype = resolve_dtype(str(config.classifier.dtype), device)
+        if metric_dtype != torch.float32:
+            raise ValueError("steering benchmark classifier must use float32")
         classifier = FrozenAGNewsClassifier.from_pretrained(
             str(config.classifier.model_name),
             device=device,

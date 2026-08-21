@@ -16,7 +16,8 @@ dataset:
 model:
   name: gpt2
   tokenizer_name: gpt2
-  dtype: auto
+  # Sampling and interventions use full-precision GPT-2 Small logits/hidden states.
+  dtype: float32
   trust_remote_code: false
   layer_path: transformer.h
   layer_index: 5
@@ -44,7 +45,8 @@ generation:
 
 classifier:
   model_name: mansoorhamidzadeh/ag-news-bert-classification
-  dtype: auto
+  # Keep reported class probabilities reproducible in the FP32 benchmark.
+  dtype: float32
   trust_remote_code: false
   batch_size: 32
   max_length: 512

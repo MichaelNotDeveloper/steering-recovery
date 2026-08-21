@@ -23,12 +23,16 @@ def test_all_primary_configs_compose():
     )
     assert denoiser.data.mode == "streaming"
     assert denoiser.data.streaming.dataset_name == "Skylion007/openwebtext"
+    assert denoiser.data.streaming.model_dtype == "float32"
+    assert denoiser.training.precision == "fp32"
     assert baseline.steering.mode == "once_at_start"
     assert cache.capture.token_selection in {"last", "all"}
     assert statistics.collection.max_tokens > 0
+    assert statistics.source.model_dtype == "float32"
     assert statistics.output_path.startswith("data/")
     assert steering_vectors.generator == "ag_news"
     assert steering_vectors.source.layer_index == 5
+    assert steering_vectors.source.model_dtype == "float32"
     assert steering_vectors.prompt.article_tokens == 48
     assert steering_vectors.prompt.prefix == "Article: "
     assert steering_vectors.prompt.suffix.endswith("about")
@@ -36,11 +40,13 @@ def test_all_primary_configs_compose():
     assert steering_vectors.collection.samples_per_topic == 1000
     assert steering_vectors.output_dir.startswith("data/")
     assert steering_benchmark.model.name == "gpt2"
+    assert steering_benchmark.model.dtype == "float32"
     assert steering_benchmark.model.layer_index == 5
     assert steering_benchmark.generation.samples_per_point == 100
     assert steering_benchmark.generation.prompt_tokens == 24
     assert steering_benchmark.generation.new_tokens == 40
     assert steering_benchmark.metrics.distinct_n == 3
+    assert steering_benchmark.classifier.dtype == "float32"
     assert steering_benchmark.classifier.class_indices.world == 0
 
 

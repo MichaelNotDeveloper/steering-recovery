@@ -279,6 +279,11 @@ def load_teacher_forced_source(
 
     from transformers import AutoModel, AutoTokenizer
 
+    from steering_recovery.runtime import is_gpt2_small_model
+
+    if is_gpt2_small_model(model_name) and dtype != torch.float32:
+        raise ValueError("GPT-2 Small teacher-forced extraction requires float32")
+
     tokenizer = AutoTokenizer.from_pretrained(
         tokenizer_name or model_name,
         trust_remote_code=trust_remote_code,

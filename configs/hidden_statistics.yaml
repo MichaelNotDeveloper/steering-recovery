@@ -13,7 +13,8 @@ dataset:
 source:
   model_name: gpt2
   tokenizer_name: gpt2
-  model_dtype: auto
+  # GPT-2 Small is always evaluated in FP32; reduced precision changes hidden states.
+  model_dtype: float32
   trust_remote_code: false
   layer_path: h
   layer_index: 5

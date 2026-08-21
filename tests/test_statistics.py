@@ -97,6 +97,7 @@ def test_collect_statistics_respects_exact_hidden_token_limit(monkeypatch, tmp_p
 
     assert result["count"] == 5
     assert payload["count"] == 5
+    assert payload["source"]["model_dtype"] == "float32"
     torch.testing.assert_close(payload["sum"], torch.tensor([15.0]).double())
     torch.testing.assert_close(payload["variance"], torch.tensor([2.0]).double())
     mean, std, _ = load_normalization_statistics(output_path)

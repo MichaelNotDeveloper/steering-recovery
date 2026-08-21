@@ -20,9 +20,11 @@ from steering_recovery.metrics import denoising_metrics
 from steering_recovery.normalization import ActivationNormalizer
 from steering_recovery.runtime import (
     config_to_dict,
+    dtype_name,
     ensure_output_dir,
+    is_gpt2_small_model,
     resolve_device,
-    resolve_dtype,
+    resolve_model_dtype,
     seed_everything,
 )
 from steering_recovery.statistics import load_normalization_statistics
@@ -65,7 +67,10 @@ def _make_generator(device: torch.device, seed: int) -> torch.Generator:
 
 
 def _validate_streaming_statistics_source(
-    statistics: Mapping[str, Any], stream_config: DictConfig
+    statistics: Mapping[str, Any],
+    stream_config: DictConfig,
+    *,
+    device: torch.device,
 ) -> None:
     source = statistics.get("source")
     if not isinstance(source, Mapping):
@@ -79,6 +84,13 @@ def _validate_streaming_statistics_source(
         "layer_path": stream_config.layer_path,
         "layer_index": int(stream_config.layer_index),
         "max_length": int(stream_config.max_length),
+        "model_dtype": dtype_name(
+            resolve_model_dtype(
+                str(stream_config.model_name),
+                str(stream_config.model_dtype),
+                device,
+            )
+        ),
     }
     mismatches = [
         f"{key}: statistics={source.get(key)!r}, training={value!r}"
@@ -108,6 +120,9 @@ def build_streaming_activation_datasets(
     if training_config.max_steps is None:
         raise ValueError("training.max_steps is required for streaming data")
     stream_config = data_config.streaming
+    model_dtype = resolve_model_dtype(
+        str(stream_config.model_name), str(stream_config.model_dtype), device
+    )
     extractor = load_teacher_forced_source(
         model_name=str(stream_config.model_name),
         tokenizer_name=stream_config.tokenizer_name,
@@ -115,7 +130,7 @@ def build_streaming_activation_datasets(
         layer_path=stream_config.layer_path,
         max_length=int(stream_config.max_length),
         device=device,
-        dtype=resolve_dtype(str(stream_config.model_dtype), device),
+        dtype=model_dtype,
         trust_remote_code=bool(stream_config.trust_remote_code),
     )
     validation_texts = int(stream_config.validation_texts)
@@ -399,7 +414,17 @@ def train_denoiser(config: DictConfig, output_dir: str | Path) -> dict[str, Any]
     mean, std, statistics = load_normalization_statistics(statistics_path)
     data_mode = str(config.data.get("mode", "static"))
     if data_mode == "streaming":
-        _validate_streaming_statistics_source(statistics, config.data.streaming)
+        _validate_streaming_statistics_source(
+            statistics, config.data.streaming, device=device
+        )
+        if (
+            is_gpt2_small_model(str(config.data.streaming.model_name))
+            and str(config.training.precision) != "fp32"
+        ):
+            raise ValueError(
+                "GPT-2 Small denoiser experiments require "
+                "training.precision=fp32"
+            )
         train_loader, val_loader = build_streaming_activation_datasets(
             config.data,
             config.training,

@@ -11,6 +11,11 @@ x_recovered = denoiser(x_noisy)
 loss = mean((x_recovered - x)²)
 ```
 
+GPT-2 Small, его hidden states и весь train/validation denoiser работают в
+`float32`. Autocast отключён (`training.precision=fp32`). Статистики без
+`source.model_dtype=float32` считаются несовместимыми и должны быть собраны
+заново.
+
 Модель предсказывает чистый нормализованный hidden state напрямую. Для каждого
 `sigma` обучается отдельная модель; noise level не передаётся на вход сети.
 
@@ -46,6 +51,7 @@ output = input + residual
 ```bash
 python collect_hidden_statistics.py \
   source.model_name=gpt2 \
+  source.model_dtype=float32 \
   source.layer_index=5 \
   collection.max_tokens=1000000 \
   output_path=data/gpt2_layer_5_statistics.pt
@@ -56,12 +62,14 @@ python collect_hidden_statistics.py \
 ```bash
 python train_denoiser.py \
   data.streaming.model_name=gpt2 \
+  data.streaming.model_dtype=float32 \
   data.streaming.layer_index=5 \
   data.statistics_path=data/gpt2_layer_5_statistics.pt \
   training.batch_size=512 \
   training.max_steps=10000 \
   training.validation_every_batches=100 \
-  training.validation_batches=50
+  training.validation_batches=50 \
+  training.precision=fp32
 ```
 
 Validation запускается каждые `validation_every_batches` train-батчей и ещё раз

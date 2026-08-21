@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import pytest
 import torch
 from torch import nn
 
@@ -12,7 +13,10 @@ from steering_recovery.steering.benchmarking.generation import (
 )
 from steering_recovery.steering.benchmarking.plotting import plot_benchmark_series
 from steering_recovery.steering.benchmarking.reporting import write_examples_html
-from steering_recovery.steering.benchmarking.runner import load_steering_vectors
+from steering_recovery.steering.benchmarking.runner import (
+    load_steering_vectors,
+    validate_gpt2_small_vector_precision,
+)
 from steering_recovery.steering.benchmarking.scoring import distinct_n
 from steering_recovery.steering.benchmarking.statistics import (
     bootstrap_mean_interval,
@@ -200,6 +204,18 @@ def test_vector_artifact_loading_and_plotting(tmp_path):
     )
     assert len(paths) == 1
     assert paths[0].is_file()
+
+
+def test_gpt2_benchmark_rejects_reduced_precision_vectors():
+    validate_gpt2_small_vector_precision(
+        {"metadata": {"source": {"model_dtype": "float32"}}},
+        source_model_name="gpt2",
+    )
+    with pytest.raises(ValueError, match="vectors generated in float32"):
+        validate_gpt2_small_vector_precision(
+            {"metadata": {"source": {"model_dtype": "bfloat16"}}},
+            source_model_name="gpt2",
+        )
 
 
 def test_examples_html_filters_alpha_and_embeds_all_metadata(tmp_path):

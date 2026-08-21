@@ -62,6 +62,7 @@ def test_streaming_training_smoke(monkeypatch, tmp_path):
                 "layer_path": "h",
                 "layer_index": 0,
                 "max_length": 8,
+                "model_dtype": "float32",
             },
         },
         statistics_path,
@@ -79,6 +80,7 @@ def test_streaming_training_smoke(monkeypatch, tmp_path):
                     "layer_path": "h",
                     "layer_index": 0,
                     "max_length": 8,
+                    "model_dtype": "float32",
                 },
             },
             "model": {

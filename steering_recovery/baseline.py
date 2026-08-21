@@ -8,7 +8,10 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
-from steering_recovery.checkpoint import load_checkpoint
+from steering_recovery.checkpoint import (
+    load_checkpoint,
+    validate_gpt2_small_denoiser_precision,
+)
 from steering_recovery.data import load_tensor
 from steering_recovery.generation import generate_with_intervention
 from steering_recovery.intervention import (
@@ -25,7 +28,7 @@ from steering_recovery.runtime import (
     config_to_dict,
     ensure_output_dir,
     resolve_device,
-    resolve_dtype,
+    resolve_model_dtype,
     seed_everything,
 )
 from steering_recovery.tracking import Tracker
@@ -38,7 +41,7 @@ def _load_model_and_tokenizer(config: DictConfig):
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     device = resolve_device(str(config.device))
-    dtype = resolve_dtype(str(config.dtype), device)
+    dtype = resolve_model_dtype(str(config.name), str(config.dtype), device)
     tokenizer = AutoTokenizer.from_pretrained(
         config.name, trust_remote_code=bool(config.trust_remote_code)
     )
@@ -141,8 +144,11 @@ def run_baseline(config: DictConfig, output_dir: str | Path) -> dict[str, Any]:
         records = records[: int(config.data.max_prompts)]
     denoiser = None
     if config.denoiser.enabled:
-        denoiser, _ = load_checkpoint(
+        denoiser, denoiser_metadata = load_checkpoint(
             config.denoiser.checkpoint, device=device, dtype=dtype
+        )
+        validate_gpt2_small_denoiser_precision(
+            denoiser_metadata, source_model_name=str(config.model.name)
         )
 
     resolved = config_to_dict(config)

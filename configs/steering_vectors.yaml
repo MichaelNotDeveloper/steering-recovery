@@ -17,7 +17,8 @@ dataset:
 source:
   model_name: gpt2
   tokenizer_name: gpt2
-  model_dtype: auto
+  # The topic means must be estimated from full-precision GPT-2 hidden states.
+  model_dtype: float32
   trust_remote_code: false
   # AutoModel(gpt2) exposes transformer blocks as h[0] ... h[11].
   layer_path: h

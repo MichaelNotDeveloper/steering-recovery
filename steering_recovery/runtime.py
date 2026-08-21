@@ -12,6 +12,8 @@ from omegaconf import DictConfig, OmegaConf
 
 LOGGER = logging.getLogger(__name__)
 
+_GPT2_SMALL_MODEL_IDS = frozenset({"gpt2", "openai-community/gpt2"})
+
 
 def seed_everything(seed: int) -> None:
     random.seed(seed)
@@ -47,6 +49,42 @@ def resolve_dtype(value: str, device: torch.device) -> torch.dtype:
         LOGGER.warning("float16 on CPU is unsupported by many kernels; using float32")
         return torch.float32
     return aliases[value]
+
+
+def is_gpt2_small_model(model_name: str) -> bool:
+    """Return whether ``model_name`` is a known GPT-2 Small model ID."""
+
+    normalized = str(model_name).strip().rstrip("/").lower()
+    return normalized in _GPT2_SMALL_MODEL_IDS
+
+
+def resolve_model_dtype(
+    model_name: str, value: str, device: torch.device
+) -> torch.dtype:
+    """Resolve model precision and enforce FP32 for GPT-2 Small.
+
+    ``auto`` intentionally means FP32 for GPT-2 Small on every device. Explicit
+    reduced-precision requests fail instead of silently producing artifacts whose
+    recorded configuration disagrees with the actual computation.
+    """
+
+    if is_gpt2_small_model(model_name):
+        if value == "auto":
+            return torch.float32
+        dtype = resolve_dtype(value, device)
+        if dtype != torch.float32:
+            raise ValueError(
+                "GPT-2 Small experiments require float32; "
+                f"got model dtype {value!r}"
+            )
+        return dtype
+    return resolve_dtype(value, device)
+
+
+def dtype_name(dtype: torch.dtype) -> str:
+    """Return the stable config spelling for a torch dtype."""
+
+    return str(dtype).removeprefix("torch.")
 
 
 def config_to_dict(config: DictConfig | dict[str, Any]) -> dict[str, Any]:

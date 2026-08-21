@@ -20,7 +20,8 @@ data:
     text_column: text
     model_name: gpt2
     tokenizer_name: gpt2
-    model_dtype: auto
+    # Keep the GPT-2 source and its hidden states in full precision.
+    model_dtype: float32
     trust_remote_code: false
     # AutoModel(gpt2) exposes its blocks as h[0..11].
     layer_path: h
@@ -45,7 +46,8 @@ training:
   weight_decay: 0.01
   betas: [0.9, 0.95]
   max_grad_norm: 1.0
-  precision: bf16
+  # Denoiser train/validation is part of the same FP32 experiment.
+  precision: fp32
   log_every_batches: 10
   validation_every_batches: 100
   validation_batches: 50

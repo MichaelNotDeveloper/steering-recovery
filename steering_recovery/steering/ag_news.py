@@ -10,9 +10,10 @@ from tqdm import tqdm
 
 from steering_recovery.runtime import (
     config_to_dict,
+    dtype_name,
     ensure_output_dir,
     resolve_device,
-    resolve_dtype,
+    resolve_model_dtype,
     seed_everything,
 )
 from steering_recovery.steering.artifacts import save_steering_artifacts
@@ -107,7 +108,9 @@ def generate_ag_news_vectors(config: DictConfig) -> dict[str, Any]:
     if samples_per_topic <= 0:
         raise ValueError("collection.samples_per_topic must be positive")
     device = resolve_device(str(config.device))
-    dtype = resolve_dtype(str(config.source.model_dtype), device)
+    dtype = resolve_model_dtype(
+        str(config.source.model_name), str(config.source.model_dtype), device
+    )
     model, tokenizer = _load_gpt2(config.source, device, dtype)
     prompt_builder = PromptTokenBuilder(
         tokenizer,
@@ -179,7 +182,7 @@ def generate_ag_news_vectors(config: DictConfig) -> dict[str, Any]:
             "layer_index": int(config.source.layer_index),
             "layer_number_one_based": int(config.source.layer_index) + 1,
             "hidden_size": extractor.hidden_size,
-            "model_dtype": str(dtype).removeprefix("torch."),
+            "model_dtype": dtype_name(dtype),
         },
         "prompt": prompt_metadata,
         "collection": {

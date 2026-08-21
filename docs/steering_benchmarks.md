@@ -27,6 +27,11 @@ post-steering denoiser на одной генеративной модели. В
 результат передаётся в `DenoiserBundle.denoise_steered`. При `alpha=0` hook не
 изменяет hidden и denoiser не вызывается: нулевая точка остаётся общей baseline.
 
+GPT-2 Small, post-steering denoiser и Frozen AG News classifier выполняются в
+`float32`. Перед запуском проверяется provenance steering-векторов и denoiser
+checkpoint: старые reduced-precision артефакты отклоняются с инструкцией по
+пересчёту.
+
 ## Промпты и генерация
 
 Один детерминированно перемешанный набор промптов используется во всех точках:

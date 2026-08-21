@@ -1,7 +1,12 @@
+import pytest
 import torch
 from torch import nn
 
-from steering_recovery.checkpoint import load_checkpoint, save_checkpoint
+from steering_recovery.checkpoint import (
+    load_checkpoint,
+    save_checkpoint,
+    validate_gpt2_small_denoiser_precision,
+)
 from steering_recovery.denoiser import (
     ActivationDenoiser,
     DenoiserBundle,
@@ -47,3 +52,29 @@ def test_bundle_normalizes_and_checkpoint_roundtrips(tmp_path):
     assert metadata["format_version"] == 2
     assert metadata["step"] == 3
     assert loaded.model_config == bundle.model_config
+
+
+def test_gpt2_denoiser_precision_provenance_is_required():
+    fp32_metadata = {
+        "config": {
+            "experiment": {
+                "data": {"streaming": {"model_dtype": "float32"}},
+                "training": {"precision": "fp32"},
+            }
+        }
+    }
+    validate_gpt2_small_denoiser_precision(
+        fp32_metadata, source_model_name="gpt2"
+    )
+    reduced_metadata = {
+        "config": {
+            "experiment": {
+                "data": {"streaming": {"model_dtype": "auto"}},
+                "training": {"precision": "bf16"},
+            }
+        }
+    }
+    with pytest.raises(ValueError, match="trained entirely in float32"):
+        validate_gpt2_small_denoiser_precision(
+            reduced_metadata, source_model_name="gpt2"
+        )

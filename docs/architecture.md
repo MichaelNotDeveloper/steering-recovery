@@ -6,6 +6,9 @@
 эксперименты. GPT-2 работает в `eval`/`inference_mode`, не обучается и производит
 teacher-forced hidden states непосредственно во время обучения. Denoiser —
 единственный trainable-модуль и позднее подключается к baseline forward hook.
+Все GPT-2 Small forwards выполняются в `float32`; эта гарантия действует для
+сбора данных, steering-векторов, baseline и benchmark. Denoiser grid также
+обучается и валидируется без autocast в FP32.
 
 ## Структура
 

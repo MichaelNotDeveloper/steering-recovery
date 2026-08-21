@@ -7,12 +7,7 @@ __pycache__/
 htmlcov/
 .venv/
 .hydra/
-data/*
-!data/steering_vectors/
-data/steering_vectors/*
-!data/steering_vectors/ag_news/
-data/steering_vectors/ag_news/*
-!data/steering_vectors/ag_news/gpt2_layer_5/
-!data/steering_vectors/ag_news/gpt2_layer_5/**
+data/
 runs/
 wandb/
+comparison/

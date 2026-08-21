@@ -13,9 +13,10 @@ from tqdm import tqdm
 from steering_recovery.layers import first_tensor, resolve_layer
 from steering_recovery.runtime import (
     config_to_dict,
+    dtype_name,
     ensure_output_dir,
     resolve_device,
-    resolve_dtype,
+    resolve_model_dtype,
     seed_everything,
 )
 from steering_recovery.statistics import RunningHiddenStatistics
@@ -123,7 +124,9 @@ def cache_activations(config: DictConfig, output_dir: str | Path) -> dict[str, A
     seed_everything(int(config.seed))
     output_dir = ensure_output_dir(output_dir)
     device = resolve_device(str(config.model.device))
-    dtype = resolve_dtype(str(config.model.dtype), device)
+    dtype = resolve_model_dtype(
+        str(config.model.name), str(config.model.dtype), device
+    )
     tokenizer = AutoTokenizer.from_pretrained(
         config.model.name, trust_remote_code=bool(config.model.trust_remote_code)
     )
@@ -196,6 +199,7 @@ def cache_activations(config: DictConfig, output_dir: str | Path) -> dict[str, A
                 "layer_path": config.capture.layer_path,
                 "layer_index": int(config.capture.layer_index),
                 "max_length": int(config.tokenization.max_length),
+                "model_dtype": dtype_name(dtype),
             },
         },
         output_dir / "statistics.pt",
@@ -204,6 +208,7 @@ def cache_activations(config: DictConfig, output_dir: str | Path) -> dict[str, A
         "format_version": 1,
         "examples": count,
         "hidden_size": int(total.numel()),
+        "model_dtype": dtype_name(dtype),
         "shards": shards,
         "config": config_to_dict(config),
     }

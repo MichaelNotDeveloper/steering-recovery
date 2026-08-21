@@ -1,0 +1,117 @@
+# Генерация steering-векторов
+
+Код генерации направлений находится в `steering_recovery/steering/`. Папка
+отделена от обучения denoiser и baseline-генерации; здесь же будут размещаться
+бенчмарки методов steering. Общая часть пайплайна не зависит от AG News:
+
+1. адаптер датасета выдаёт пары `(label, text)`;
+2. сборщик набирает точную квоту hidden states для каждой группы;
+3. prompt builder ограничивает текст на уровне token IDs;
+4. extractor снимает последний hidden выбранного transformer block;
+5. произвольные positive/negative группы задаются через `ContrastDefinition`.
+
+## AG News: темы one-vs-rest
+
+Конфигурация по умолчанию использует
+[`sh0416/ag_news`](https://huggingface.co/datasets/sh0416/ag_news), split `train`
+и поле `description`. Поле `title` не добавляется: в этой конфигурации
+`description` считается текстом статьи. Датасет перемешивается с фиксированным
+`seed=42`, после чего собирается по 1000 примеров каждой исходной метки:
+
+| Label | Тема | Файл |
+|---:|---|---|
+| 1 | World | `world.pt` |
+| 2 | Sports | `sports.pt` |
+| 3 | Business | `business.pt` |
+| 4 | Sci/Tech | `sci_tech.pt` |
+
+Для каждого текста сначала вычисляются GPT-2 token IDs и берутся первые 48.
+К ним без повторной токенизации добавляются token IDs префикса и суффикса:
+
+```text
+Article: {первые 48 GPT-2 токенов description}
+This article is mainly about
+```
+
+Forward hook установлен на `h[5]`, то есть на шестой transformer block GPT-2.
+Из его выхода берётся позиция последнего настоящего токена prompt — токена
+` about`. При запуске это проверяется по tokenizer; padding не участвует в
+выборе.
+
+Для темы `c` направление вычисляется как
+
+```text
+v_c = mean(hidden[label = c]) - mean(hidden[label != c])
+```
+
+Положительное среднее содержит 1000 hidden states, отрицательное — 3000
+состояний, по 1000 от каждой из остальных тем. Моменты считаются потоково в
+`float64` формулами Chan/Welford; хранить все 4000 активаций в памяти не нужно.
+
+## Запуск
+
+```bash
+python generate_steering_vectors.py
+```
+
+Для smoke-прогона с малыми квотами и отдельной директорией:
+
+```bash
+python generate_steering_vectors.py \
+  collection.samples_per_topic=8 \
+  collection.batch_size=8 \
+  output_dir=data/steering_vectors/ag_news/smoke
+```
+
+Параметры модели, слоя, prompt, колонок датасета и квот переопределяются обычными
+Hydra overrides. Например, чтобы использовать заголовок вместо описания:
+
+```bash
+python generate_steering_vectors.py dataset.text_column=title
+```
+
+## Артефакты
+
+По умолчанию файлы записываются в
+`data/steering_vectors/ag_news/gpt2_layer_5/`:
+
+```text
+business.pt
+config.yaml
+manifest.json
+sci_tech.pt
+sports.pt
+steering_vectors.pt
+world.pt
+```
+
+Каждый тематический `.pt` содержит ключ `steering_vector: Tensor[768]` и поэтому
+непосредственно совместим с `baseline.steering.vector.key=steering_vector`.
+Рядом сохранены positive/negative means, размеры выборок и полные метаданные:
+датасет, seed, модель, tokenizer, индекс слоя, prompt и метод расчёта.
+
+`steering_vectors.pt` содержит общую матрицу `[4, 768]` под ключом
+`steering_vectors`, имена/метки направлений, групповые mean/variance/count и те
+же метаданные. `manifest.json` — человекочитаемое описание файлов и L2-норм
+векторов, а `config.yaml` — фактически использованный Hydra-конфиг.
+
+Чтобы использовать, например, World-вектор в существующем baseline GPT-2,
+нужно согласовать модель и слой вмешательства:
+
+```bash
+python run_baselines.py \
+  model.name=gpt2 \
+  steering.vector.path=data/steering_vectors/ag_news/gpt2_layer_5/world.pt \
+  steering.layer_path=transformer.h \
+  steering.layer_index=5 \
+  steering.scale=1
+```
+
+## Добавление нового источника
+
+Новый метод поиска не должен дублировать batching и hook. Достаточно добавить
+адаптер, который выдаёт `LabeledText`, определить группы и contrasts, затем
+передать их в `collect_group_moments` и `compute_contrasts`. Если у задачи не
+one-vs-rest разметка, `ContrastDefinition` позволяет указать несколько
+positive и negative labels явно. Новый generator регистрируется в
+`steering_recovery/steering/pipeline.py`.

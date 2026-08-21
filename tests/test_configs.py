@@ -10,6 +10,7 @@ def test_all_primary_configs_compose():
         baseline = compose(config_name="baseline")
         cache = compose(config_name="cache_activations")
         statistics = compose(config_name="hidden_statistics")
+        steering_vectors = compose(config_name="steering_vectors")
     assert list(denoiser.model.latent_dims) == [192, 768, 3072]
     assert list(denoiser.model.num_layers) == [1, 3, 5]
     assert list(denoiser.model.sigmas) == [0.1, 0.2, 0.5]
@@ -25,6 +26,14 @@ def test_all_primary_configs_compose():
     assert cache.capture.token_selection in {"last", "all"}
     assert statistics.collection.max_tokens > 0
     assert statistics.output_path.startswith("data/")
+    assert steering_vectors.generator == "ag_news"
+    assert steering_vectors.source.layer_index == 5
+    assert steering_vectors.prompt.article_tokens == 48
+    assert steering_vectors.prompt.prefix == "Article: "
+    assert steering_vectors.prompt.suffix.endswith("about")
+    assert steering_vectors.prompt.expected_last_token == "about"
+    assert steering_vectors.collection.samples_per_topic == 1000
+    assert steering_vectors.output_dir.startswith("data/")
 
 
 def test_sweep_config_registers_parameter_grid():

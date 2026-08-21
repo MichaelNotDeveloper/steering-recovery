@@ -14,6 +14,7 @@ steering-recovery/
 ├── cache_activations.py       # Hydra-entrypoint сбора hidden states
 ├── collect_hidden_statistics.py # streaming sum/variance GPT-2 hidden states
 ├── compare_denoisers.py       # CSV/Markdown/barplot по model folders
+├── generate_steering_vectors.py # Hydra-entrypoint поиска steering-векторов
 ├── train_denoiser.py          # Hydra-entrypoint обучения
 ├── run_baselines.py           # Hydra-entrypoint генерации
 ├── configs/
@@ -32,6 +33,11 @@ steering-recovery/
 │   ├── intervention.py        # политики steering
 │   ├── generation.py          # autoregressive loop с KV-cache
 │   ├── baseline.py            # оркестрация baseline
+│   ├── steering/              # генерация векторов и будущие бенчмарки
+│   │   ├── core.py            # prompt, hook, квоты групп и contrasts
+│   │   ├── ag_news.py         # адаптер и one-vs-rest темы AG News
+│   │   ├── artifacts.py       # .pt-векторы и manifest с метаданными
+│   │   └── pipeline.py        # registry/dispatch генераторов
 │   └── reporting.py           # JSONL и HTML-отчёт
 ├── docs/
 └── tests/
@@ -50,6 +56,9 @@ flowchart LR
     F["Prompts + steering vector"] --> G["Baseline generation"]
     J -->|"best model checkpoint"| G
     G --> H["JSONL + HTML + W&B"]
+    K["AG News labeled articles"] --> L["GPT-2 h[5] hidden over 'about'"]
+    L --> M["Four one-vs-rest mean differences"]
+    M --> N["data/steering_vectors + metadata"]
 ```
 
 ## Форматы данных
@@ -147,6 +156,12 @@ map.
 Набор направлений для обучения: `[n_vectors, hidden_size]` или словарь с
 `steering_vectors`. Слой и hidden size должны совпадать с кешированными
 активациями.
+
+Генераторы и будущие бенчмарки steering изолированы в
+`steering_recovery/steering/`. Первый генератор строит четыре AG News
+направления как `mean(topic) - mean(other topics)` по hidden последнего токена
+prompt на выходе `h[5]` GPT-2. Детальный формат артефактов и запуск описаны в
+[отдельном документе](steering_vectors.md).
 
 ### Prompts
 

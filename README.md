@@ -8,7 +8,8 @@
   `every_step`, `entropy_threshold`;
 - совместное обучение grid residual MLP denoiser на Gaussian noise;
 - Hydra-конфигурации и multirun-перебор гиперпараметров;
-- метрики и артефакты в Weights & Biases.
+- метрики и артефакты в Weights & Biases;
+- расширяемая генерация steering-векторов по размеченным датасетам.
 
 ## Быстрый старт
 
@@ -95,8 +96,21 @@ python run_baselines.py \
   wandb.enabled=false
 ```
 
-Все параметры можно переопределять из CLI. Подробности: [архитектура](docs/architecture.md)
-и [обучение denoiser](docs/denoiser_training.md).
+Steering-векторы четырёх тем AG News (`World`, `Sports`, `Business`,
+`Sci/Tech`) по hidden-состоянию шестого блока GPT-2:
+
+```bash
+python generate_steering_vectors.py
+```
+
+Команда собирает по 1000 состояний каждой темы и сохраняет отдельные векторы и
+полные метаданные в `data/steering_vectors/ag_news/gpt2_layer_5/`. Формат,
+точный prompt и расширение пайплайна описаны в
+[документации по steering-векторам](docs/steering_vectors.md).
+
+Все параметры можно переопределять из CLI. Подробности: [архитектура](docs/architecture.md),
+[обучение denoiser](docs/denoiser_training.md) и
+[генерация steering-векторов](docs/steering_vectors.md).
 
 ## Проверки
 

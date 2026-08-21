@@ -33,10 +33,8 @@ from steering_recovery.steering.benchmarking.data import (
 from steering_recovery.steering.benchmarking.generation import (
     generate_steered_continuation,
 )
-from steering_recovery.steering.benchmarking.scoring import (
-    ConditionalPerplexityScorer,
-    FrozenAGNewsClassifier,
-)
+from steering_recovery.steering.benchmarking.reporting import write_examples_html
+from steering_recovery.steering.benchmarking.scoring import FrozenAGNewsClassifier, distinct_n
 from steering_recovery.steering.benchmarking.statistics import summarize_condition
 
 
@@ -247,7 +245,8 @@ def _write_examples_markdown(rows: Sequence[dict[str, Any]], path: Path) -> None
                 f"Source topic: `{row['source_topic']}` · sample: `{row['sample_id']}`",
                 "",
                 f"Target probability: `{float(row['target_probability']):.4f}` · "
-                f"perplexity: `{float(row['perplexity']):.4f}`",
+                f"Dist-{int(row['distinct_n_order'])}: "
+                f"`{float(row['distinct_n']):.4f}`",
                 "",
                 "```text",
                 str(row["full_text"]),
@@ -494,43 +493,27 @@ def run_steering_benchmark(
         _release_model(classifier)
         classifier = None
 
-    perplexity_signature = _signature(config_to_dict(config.perplexity))
-    perplexity_needed = any(
-        any(
-            "perplexity" not in row
-            or row.get("perplexity_signature") != perplexity_signature
-            for row in _load_jsonl(path)
-        )
-        for path in condition_files
-    )
-    if perplexity_needed:
-        metric_dtype = resolve_dtype(str(config.perplexity.dtype), device)
-        scorer = ConditionalPerplexityScorer.from_pretrained(
-            str(config.perplexity.model_name),
-            str(config.perplexity.tokenizer_name),
-            device=device,
-            dtype=metric_dtype,
-            trust_remote_code=bool(config.perplexity.trust_remote_code),
-        )
-        for path in tqdm(condition_files, desc="perplexity metrics", unit="condition"):
-            rows = _load_jsonl(path)
-            if all(
-                "perplexity" in row
-                and row.get("perplexity_signature") == perplexity_signature
-                for row in rows
+    distinct_order = int(config.metrics.distinct_n)
+    if distinct_order <= 0:
+        raise ValueError("metrics.distinct_n must be positive")
+    distinct_signature = _signature({"distinct_n": distinct_order})
+    for path in tqdm(condition_files, desc=f"Dist-{distinct_order}", unit="condition"):
+        rows = _load_jsonl(path)
+        changed = False
+        for row in rows:
+            if (
+                "distinct_n" not in row
+                or "distinct_n_order" not in row
+                or row.get("distinct_n_signature") != distinct_signature
             ):
-                continue
-            scores = scorer.score(
-                [row["prompt_token_ids"] for row in rows],
-                [row["generated_token_ids"] for row in rows],
-                batch_size=int(config.perplexity.batch_size),
-            )
-            for row, score in zip(rows, scores):
-                row["perplexity"] = score
-                row["perplexity_signature"] = perplexity_signature
+                row["distinct_n"] = distinct_n(
+                    row["generated_token_ids"], distinct_order
+                )
+                row["distinct_n_order"] = distinct_order
+                row["distinct_n_signature"] = distinct_signature
+                changed = True
+        if changed:
             _atomic_write_jsonl(rows, path)
-        _release_model(scorer)
-        scorer = None
 
     all_rows = [_load_jsonl(path) for path in condition_files]
     summaries = [
@@ -556,6 +539,7 @@ def run_steering_benchmark(
     ]
     _atomic_write_jsonl(example_rows, output_dir / "examples.jsonl")
     _write_examples_markdown(example_rows, output_dir / "examples.md")
+    write_examples_html(example_rows, output_dir / "examples.html")
     from steering_recovery.steering.benchmarking.plotting import (
         plot_benchmark_series,
     )
@@ -565,7 +549,6 @@ def run_steering_benchmark(
         output_dir / "plots",
         formats=[str(value) for value in config.plot.formats],
         dpi=int(config.plot.dpi),
-        log_perplexity_axis=bool(config.plot.log_perplexity_axis),
     )
     result = {
         "format_version": 1,
@@ -581,9 +564,9 @@ def run_steering_benchmark(
             "class_indices": class_indices,
             **classifier_metadata,
         },
-        "perplexity_model": str(config.perplexity.model_name),
+        "distinct_n_order": distinct_order,
         "summary_files": ["summary.jsonl", "summary.csv"],
-        "example_files": ["examples.jsonl", "examples.md"],
+        "example_files": ["examples.jsonl", "examples.md", "examples.html"],
         "plots": [str(path.relative_to(output_dir)) for path in plot_paths],
     }
     (output_dir / "manifest.json").write_text(

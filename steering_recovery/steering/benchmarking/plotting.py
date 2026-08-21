@@ -20,9 +20,8 @@ def plot_benchmark_series(
     *,
     formats: Sequence[str],
     dpi: int,
-    log_perplexity_axis: bool,
 ) -> list[Path]:
-    """Plot one alpha-colored probability/PPL series per vector and method."""
+    """Plot one alpha-colored probability/Dist-N series per vector and method."""
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -43,11 +42,11 @@ def plot_benchmark_series(
         for row in ordered:
             alpha = float(row["alpha"])
             x = float(row["target_probability_mean"])
-            y = float(row["perplexity_mean"])
+            y = float(row["distinct_n_mean"])
             x_low = float(row["target_probability_ci_low"])
             x_high = float(row["target_probability_ci_high"])
-            y_low = float(row["perplexity_ci_low"])
-            y_high = float(row["perplexity_ci_high"])
+            y_low = float(row["distinct_n_ci_low"])
+            y_high = float(row["distinct_n_ci_high"])
             color = cmap(norm(alpha))
             width, height = x_high - x_low, y_high - y_low
             if width > 0 and height > 0:
@@ -85,12 +84,12 @@ def plot_benchmark_series(
             )
         vector_name = str(ordered[0]["vector_name"])
         confidence = float(ordered[0]["confidence"])
+        distinct_order = int(ordered[0]["distinct_n_order"])
         axis.set_title(f"{vector_name} steering · {method}")
         axis.set_xlabel("Frozen AG News classifier: target-class probability")
-        axis.set_ylabel("GPT-2 Medium conditional perplexity")
+        axis.set_ylabel(f"Distinct-{distinct_order}")
         axis.set_xlim(0, 1)
-        if log_perplexity_axis:
-            axis.set_yscale("log")
+        axis.set_ylim(0, 1)
         axis.grid(True, alpha=0.22)
         scalar = ScalarMappable(norm=norm, cmap=cmap)
         scalar.set_array([])

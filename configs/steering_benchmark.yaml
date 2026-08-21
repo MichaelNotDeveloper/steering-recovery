@@ -55,13 +55,9 @@ classifier:
     business: 2
     sci_tech: 3
 
-perplexity:
-  model_name: gpt2-medium
-  # GPT-2 and GPT-2 Medium share these token IDs, preserving the exact boundary.
-  tokenizer_name: gpt2
-  dtype: auto
-  trust_remote_code: false
-  batch_size: 16
+metrics:
+  # Unique generated token trigrams / all 38 generated token trigrams.
+  distinct_n: 3
 
 statistics:
   confidence: 0.95
@@ -74,7 +70,6 @@ examples:
 plot:
   formats: [png]
   dpi: 180
-  log_perplexity_axis: true
 
 hydra:
   job:

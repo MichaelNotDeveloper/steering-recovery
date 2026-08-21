@@ -62,7 +62,7 @@ flowchart LR
     L --> M["Four one-vs-rest mean differences"]
     M --> N["data/steering_vectors + metadata"]
     N --> O["alpha × vector × post-steering method"]
-    O --> P["BERT probability + GPT-2 Medium PPL"]
+    O --> P["BERT probability + generated-token Dist-3"]
     P --> Q["Bootstrap CI scatter-plots"]
 ```
 

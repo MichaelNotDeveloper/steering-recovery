@@ -116,8 +116,8 @@ python run_steering_benchmarks.py
 ```
 
 Для каждой пары «AG News-вектор × метод» строится scatter-график target-class
-probability против conditional perplexity GPT-2 Medium. Цвет кодирует `alpha`,
-а вокруг точек показывается 95% bootstrap CI. Подробности и формат результатов:
+probability против Dist-3 с интерактивной HTML-галереей примеров. Цвет кодирует
+`alpha`, а вокруг точек показывается 95% bootstrap CI. Подробности и формат результатов:
 [документация по бенчмаркам](docs/steering_benchmarks.md).
 
 Все параметры можно переопределять из CLI. Подробности: [архитектура](docs/architecture.md),

@@ -51,6 +51,7 @@ def summarize_condition(
         "target_dataset_label",
         "target_classifier_index",
         "alpha",
+        "distinct_n_order",
     )
     for field in stable_fields:
         if any(row[field] != first[field] for row in rows):
@@ -61,8 +62,8 @@ def summarize_condition(
         resamples=bootstrap_resamples,
         seed=seed,
     )
-    perplexity = bootstrap_mean_interval(
-        [float(row["perplexity"]) for row in rows],
+    diversity = bootstrap_mean_interval(
+        [float(row["distinct_n"]) for row in rows],
         confidence=confidence,
         resamples=bootstrap_resamples,
         seed=seed + 1,
@@ -74,9 +75,9 @@ def summarize_condition(
         "target_probability_mean": probability[0],
         "target_probability_ci_low": probability[1],
         "target_probability_ci_high": probability[2],
-        "perplexity_mean": perplexity[0],
-        "perplexity_ci_low": perplexity[1],
-        "perplexity_ci_high": perplexity[2],
+        "distinct_n_mean": diversity[0],
+        "distinct_n_ci_low": diversity[1],
+        "distinct_n_ci_high": diversity[2],
         "mean_generated_tokens": float(
             np.mean([len(row["generated_token_ids"]) for row in rows])
         ),

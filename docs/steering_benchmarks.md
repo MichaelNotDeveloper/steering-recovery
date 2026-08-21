@@ -59,20 +59,18 @@ World=0, Sports=1, Business=2, Sci/Tech=3
 Соответствие задано явно в `classifier.class_indices` и не зависит от текстовых
 значений `id2label` конкретной версии checkpoint.
 
-### Conditional perplexity
+### Dist-3
 
-GPT-2 Medium получает полную последовательность из 24 prompt-токенов и 40
-сгенерированных токенов. Cross-entropy для prompt полностью маскируется;
-учитываются только generated targets, включая первый токен continuation,
-предсказанный последней позицией prompt:
+Для каждой 40-токенной сгенерированной части строятся триграммы непосредственно
+по GPT-2 token IDs. Dist-3 — доля уникальных триграмм среди всех возможных:
 
 ```text
-PPL = exp(-1/40 * Σ log p(y_t | prompt, y_<t))
+Dist-3 = unique generated token trigrams / 38 generated token trigrams
 ```
 
-GPT-2 и GPT-2 Medium используют общий GPT-2 tokenizer, поэтому бенчмарк передаёт
-исходные token IDs и сохраняет точную границу prompt/continuation без повторной
-токенизации текста.
+Значение лежит в `[0, 1]`: более высокая величина означает меньше повторяющихся
+триграмм. Порядок `n` задаётся через `metrics.distinct_n`; текущий канонический
+прогон использует `n=3`. Дополнительная language model для этой метрики не нужна.
 
 ## Доверительные интервалы и графики
 
@@ -83,10 +81,10 @@ interval по 100 генерациям. По умолчанию использу
 Для каждой пары `(vector, method)` создаётся отдельный scatter-plot:
 
 - ось X — mean target-class probability;
-- ось Y — mean conditional perplexity;
+- ось Y — mean Dist-3;
 - цвет точки — значение `alpha`;
 - error bars и полупрозрачный эллипс вокруг точки — bootstrap CI обеих метрик;
-- ось perplexity логарифмическая по умолчанию.
+- обе оси ограничены диапазоном `[0, 1]`.
 
 ## Методы и denoiser
 
@@ -156,16 +154,22 @@ runs/steering-benchmarks/<date>/<time>/
 ├── summary.jsonl
 ├── examples.jsonl
 ├── examples.md
+├── examples.html
 ├── config.yaml
 └── manifest.json
 ```
 
 Condition JSONL содержит все 100 генераций, token IDs, обе метрики, исходную
-тему, seed и число вмешательств. Для каждой точки в `examples.jsonl/.md`
-сохраняется восемь примеров: по два для исходных тем World, Sports, Business и
-Sci/Tech.
+тему, seed и число вмешательств. Для каждой точки в файлах примеров сохраняется
+восемь генераций: по две для исходных тем World, Sports, Business и Sci/Tech.
+
+`examples.html` — автономная интерактивная галерея. В ней можно фильтровать
+примеры по `alpha`, steering vector, методу и исходной теме. У каждой генерации
+показываются prompt/continuation, основные метрики и раскрываемый полный JSON со
+всей сохранённой метаинформацией, включая token IDs, seed, checkpoint, режим и
+число вмешательств.
 
 Запуск возобновляемый. Завершённые condition-файлы с совпадающей сигнатурой
-пропускаются; незавершённая точка продолжается из `.partial.jsonl`. Генеративная
-модель, classifier и GPT-2 Medium загружаются последовательно, чтобы снизить
-пиковое потребление памяти.
+пропускаются; незавершённая точка продолжается из `.partial.jsonl`. Frozen
+classifier загружается только после окончания генерации, чтобы снизить пиковое
+потребление памяти.

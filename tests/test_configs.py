@@ -40,7 +40,7 @@ def test_all_primary_configs_compose():
     assert steering_benchmark.generation.samples_per_point == 100
     assert steering_benchmark.generation.prompt_tokens == 24
     assert steering_benchmark.generation.new_tokens == 40
-    assert steering_benchmark.perplexity.model_name == "gpt2-medium"
+    assert steering_benchmark.metrics.distinct_n == 3
     assert steering_benchmark.classifier.class_indices.world == 0
 
 

@@ -1,6 +1,5 @@
 from types import SimpleNamespace
 
-import numpy as np
 import torch
 from torch import nn
 
@@ -12,10 +11,9 @@ from steering_recovery.steering.benchmarking.generation import (
     generate_steered_continuation,
 )
 from steering_recovery.steering.benchmarking.plotting import plot_benchmark_series
+from steering_recovery.steering.benchmarking.reporting import write_examples_html
 from steering_recovery.steering.benchmarking.runner import load_steering_vectors
-from steering_recovery.steering.benchmarking.scoring import (
-    conditional_perplexities_from_logits,
-)
+from steering_recovery.steering.benchmarking.scoring import distinct_n
 from steering_recovery.steering.benchmarking.statistics import (
     bootstrap_mean_interval,
     summarize_condition,
@@ -113,18 +111,9 @@ def test_benchmark_generation_keeps_exact_new_token_count():
     assert denoiser.calls == 4
 
 
-def test_conditional_perplexity_masks_prompt_targets():
-    input_ids = torch.tensor([[0, 1, 2, 3]])
-    attention_mask = torch.ones_like(input_ids)
-    logits = torch.zeros(1, 4, 4)
-    # Only positions predicting generated labels 2 and 3 are accurate.
-    logits[0, 1, 2] = 10
-    logits[0, 2, 3] = 10
-    perplexity = conditional_perplexities_from_logits(
-        logits, input_ids, attention_mask, torch.tensor([2])
-    )
-    expected = np.exp(np.log(np.exp(10) + 3) - 10)
-    np.testing.assert_allclose(perplexity.numpy(), [expected], rtol=1e-5)
+def test_distinct_n_uses_generated_token_ngrams():
+    assert distinct_n([1, 2, 3, 1, 2, 3], 3) == 3 / 4
+    assert distinct_n([1, 2], 3) == 0
 
 
 def test_bootstrap_summary_and_example_quota_are_deterministic():
@@ -146,10 +135,11 @@ def test_bootstrap_summary_and_example_quota_are_deterministic():
                     "target_dataset_label": 1,
                     "target_classifier_index": 0,
                     "alpha": 1.0,
+                    "distinct_n_order": 3,
                     "sample_index": source_label * 10 + index,
                     "source_label": source_label,
                     "target_probability": 0.5,
-                    "perplexity": 2.0,
+                    "distinct_n": 0.75,
                     "generated_token_ids": [1] * 40,
                 }
             )
@@ -162,7 +152,7 @@ def test_bootstrap_summary_and_example_quota_are_deterministic():
         rows, confidence=0.95, bootstrap_resamples=100, seed=8
     )
     assert summary["target_probability_mean"] == 0.5
-    assert summary["perplexity_mean"] == 2.0
+    assert summary["distinct_n_mean"] == 0.75
     assert summary["mean_generated_tokens"] == 40
 
 
@@ -196,9 +186,10 @@ def test_vector_artifact_loading_and_plotting(tmp_path):
                 "target_probability_mean": 0.2 + alpha * 0.2,
                 "target_probability_ci_low": 0.18 + alpha * 0.2,
                 "target_probability_ci_high": 0.22 + alpha * 0.2,
-                "perplexity_mean": 10 + alpha,
-                "perplexity_ci_low": 9 + alpha,
-                "perplexity_ci_high": 11 + alpha,
+                "distinct_n_order": 3,
+                "distinct_n_mean": 0.6 + alpha * 0.1,
+                "distinct_n_ci_low": 0.58 + alpha * 0.1,
+                "distinct_n_ci_high": 0.62 + alpha * 0.1,
             }
         )
     paths = plot_benchmark_series(
@@ -206,7 +197,29 @@ def test_vector_artifact_loading_and_plotting(tmp_path):
         tmp_path / "plots",
         formats=["png"],
         dpi=72,
-        log_perplexity_axis=True,
     )
     assert len(paths) == 1
     assert paths[0].is_file()
+
+
+def test_examples_html_filters_alpha_and_embeds_all_metadata(tmp_path):
+    row = {
+        "method": "raw",
+        "vector_slug": "world",
+        "vector_name": "World",
+        "alpha": 0.5,
+        "source_topic": "Sports",
+        "target_probability": 0.7,
+        "distinct_n_order": 3,
+        "distinct_n": 0.8,
+        "seed": 11,
+        "prompt_text": "prompt <text>",
+        "generated_text": " generated",
+        "custom_metadata": {"keep": "everything"},
+    }
+    path = write_examples_html([row], tmp_path / "examples.html")
+    document = path.read_text(encoding="utf-8")
+    assert 'id="alpha"' in document
+    assert "All generation metadata" in document
+    assert "custom_metadata" in document
+    assert "\\u003ctext>" in document

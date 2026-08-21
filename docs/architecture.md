@@ -15,6 +15,7 @@ steering-recovery/
 ├── collect_hidden_statistics.py # streaming sum/variance GPT-2 hidden states
 ├── compare_denoisers.py       # CSV/Markdown/barplot по model folders
 ├── generate_steering_vectors.py # Hydra-entrypoint поиска steering-векторов
+├── run_steering_benchmarks.py # benchmark alpha × vector × method
 ├── train_denoiser.py          # Hydra-entrypoint обучения
 ├── run_baselines.py           # Hydra-entrypoint генерации
 ├── configs/
@@ -33,11 +34,12 @@ steering-recovery/
 │   ├── intervention.py        # политики steering
 │   ├── generation.py          # autoregressive loop с KV-cache
 │   ├── baseline.py            # оркестрация baseline
-│   ├── steering/              # генерация векторов и будущие бенчмарки
+│   ├── steering/              # генерация векторов и бенчмарки steering
 │   │   ├── core.py            # prompt, hook, квоты групп и contrasts
 │   │   ├── ag_news.py         # адаптер и one-vs-rest темы AG News
 │   │   ├── artifacts.py       # .pt-векторы и manifest с метаданными
-│   │   └── pipeline.py        # registry/dispatch генераторов
+│   │   ├── pipeline.py        # registry/dispatch генераторов
+│   │   └── benchmarking/      # генерация, scoring, CI и scatter-plots
 │   └── reporting.py           # JSONL и HTML-отчёт
 ├── docs/
 └── tests/
@@ -59,6 +61,9 @@ flowchart LR
     K["AG News labeled articles"] --> L["GPT-2 h[5] hidden over 'about'"]
     L --> M["Four one-vs-rest mean differences"]
     M --> N["data/steering_vectors + metadata"]
+    N --> O["alpha × vector × post-steering method"]
+    O --> P["BERT probability + GPT-2 Medium PPL"]
+    P --> Q["Bootstrap CI scatter-plots"]
 ```
 
 ## Форматы данных
@@ -162,6 +167,11 @@ map.
 направления как `mean(topic) - mean(other topics)` по hidden последнего токена
 prompt на выходе `h[5]` GPT-2. Детальный формат артефактов и запуск описаны в
 [отдельном документе](steering_vectors.md).
+
+Benchmark runner использует сохранённые направления, один общий набор из 100
+AG News prompts и строит отдельный график для каждой пары vector/method. Метрики,
+resume-формат и подключение post-steering checkpoint описаны в
+[документации бенчмарка](steering_benchmarks.md).
 
 ### Prompts
 

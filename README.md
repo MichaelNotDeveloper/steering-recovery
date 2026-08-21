@@ -109,9 +109,21 @@ python generate_steering_vectors.py
 точный prompt и расширение пайплайна описаны в
 [документации по steering-векторам](docs/steering_vectors.md).
 
+Бенчмарк силы steering и post-steering denoiser:
+
+```bash
+python run_steering_benchmarks.py
+```
+
+Для каждой пары «AG News-вектор × метод» строится scatter-график target-class
+probability против conditional perplexity GPT-2 Medium. Цвет кодирует `alpha`,
+а вокруг точек показывается 95% bootstrap CI. Подробности и формат результатов:
+[документация по бенчмаркам](docs/steering_benchmarks.md).
+
 Все параметры можно переопределять из CLI. Подробности: [архитектура](docs/architecture.md),
 [обучение denoiser](docs/denoiser_training.md) и
-[генерация steering-векторов](docs/steering_vectors.md).
+[генерация steering-векторов](docs/steering_vectors.md),
+[бенчмарки steering](docs/steering_benchmarks.md).
 
 ## Проверки
 

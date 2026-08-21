@@ -1,0 +1,31 @@
+generator: ag_news
+seed: 42
+device: auto
+dataset:
+  name: sh0416/ag_news
+  config: null
+  split: train
+  text_column: description
+  label_column: label
+  streaming: false
+  shuffle: true
+  shuffle_buffer_size: 10000
+  max_rows: null
+source:
+  model_name: gpt2
+  tokenizer_name: gpt2
+  model_dtype: auto
+  trust_remote_code: false
+  layer_path: h
+  layer_index: 5
+prompt:
+  prefix: 'Article: '
+  suffix: '
+
+    This article is mainly about'
+  article_tokens: 48
+  expected_last_token: about
+collection:
+  samples_per_topic: 1000
+  batch_size: 32
+output_dir: data/steering_vectors/ag_news/gpt2_layer_${source.layer_index}

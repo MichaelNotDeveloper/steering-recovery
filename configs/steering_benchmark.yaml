@@ -1,0 +1,83 @@
+seed: 2026
+device: auto
+resume: true
+
+dataset:
+  name: sh0416/ag_news
+  config: null
+  # The held-out split avoids evaluating on vector-estimation articles.
+  split: test
+  text_column: description
+  label_column: label
+  streaming: false
+  shuffle: true
+  shuffle_buffer_size: 10000
+
+model:
+  name: gpt2
+  tokenizer_name: gpt2
+  dtype: auto
+  trust_remote_code: false
+  layer_path: transformer.h
+  layer_index: 5
+  entropy_threshold: 0.35
+
+steering_vectors_path: data/steering_vectors/ag_news/gpt2_layer_5/steering_vectors.pt
+
+# Every method is an intervention policy plus an optional post-steering denoiser.
+# Add more entries with unique names and paths to format_version=2 checkpoints.
+methods:
+  - name: raw
+    intervention_mode: every_step
+    denoiser_checkpoint: null
+
+alphas: [0.0, 0.25, 0.5, 1.0, 2.0]
+
+generation:
+  samples_per_point: 100
+  prompt_tokens: 24
+  new_tokens: 40
+  temperature: 0.7
+  top_p: 0.95
+  # Keep exactly 40 generated tokens even if GPT-2 samples EOS.
+  stop_on_eos: false
+
+classifier:
+  model_name: mansoorhamidzadeh/ag-news-bert-classification
+  dtype: auto
+  trust_remote_code: false
+  batch_size: 32
+  max_length: 512
+  # The classifier was fine-tuned on the standard 0-based AG News labels.
+  class_indices:
+    world: 0
+    sports: 1
+    business: 2
+    sci_tech: 3
+
+perplexity:
+  model_name: gpt2-medium
+  # GPT-2 and GPT-2 Medium share these token IDs, preserving the exact boundary.
+  tokenizer_name: gpt2
+  dtype: auto
+  trust_remote_code: false
+  batch_size: 16
+
+statistics:
+  confidence: 0.95
+  bootstrap_resamples: 2000
+
+examples:
+  # 2 examples from every source topic = 8 examples for every plotted point.
+  per_source_topic: 2
+
+plot:
+  formats: [png]
+  dpi: 180
+  log_perplexity_axis: true
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: runs/steering-benchmarks/${now:%Y-%m-%d}/${now:%H-%M-%S}

@@ -85,7 +85,8 @@ python compare_denoisers.py /path/to/run --output-dir comparison
 
 Скрипт сохраняет общий barplot и отдельный PNG для каждого
 `sigma`; все оси метрик логарифмические. Новые запуски также отображают
-`score_rms = sqrt(mean((denoised - noisy)²) / sigma⁴)`.
+`score_rms = sqrt(mean((denoised - noisy)²) / sigma⁴)`. Тонкие чёрные ticks
+показывают identity-baseline `f(y)=y` для каждой модели.
 
 Baseline без steering:
 

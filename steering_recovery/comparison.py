@@ -160,15 +160,22 @@ def _write_barplot(
     colors = [color_by_sigma[row.sigma] for row in rows]
     figure_height = max(8.0, len(rows) * 0.42)
     panels = [
-        ("Validation L2", [row.l2 for row in rows], "lower is better (log scale)"),
+        (
+            "Validation L2",
+            [row.l2 for row in rows],
+            [row.noisy_l2 for row in rows],
+            "lower is better (log scale)",
+        ),
         (
             "Validation RMSE",
             [row.rmse for row in rows],
+            [row.noisy_rmse for row in rows],
             "lower is better (log scale)",
         ),
         (
             "Validation cosine distance",
             [row.cosine_distance for row in rows],
+            [row.noisy_cosine_distance for row in rows],
             "lower is better (log scale)",
         ),
     ]
@@ -177,6 +184,7 @@ def _write_barplot(
             (
                 "Estimated score RMS",
                 [float(row.score_rms) for row in rows],
+                [0.0 for _row in rows],
                 "RMS magnitude (log scale)",
             )
         )
@@ -187,17 +195,36 @@ def _write_barplot(
         sharey=True,
     )
     positions = list(range(len(rows)))
-    for axis, (panel_title, values, axis_label) in zip(axes, panels, strict=True):
-        if any(value < 0 for value in values):
+    for axis, (panel_title, values, identity_values, axis_label) in zip(
+        axes, panels, strict=True
+    ):
+        if any(value < 0 for value in values + identity_values):
             raise ValueError(f"{panel_title} cannot contain negative values")
-        positive_values = [value for value in values if value > 0]
+        positive_values = [value for value in values + identity_values if value > 0]
         log_floor = min(positive_values) * 0.1 if positive_values else 1e-12
         plotted_values = [value if value > 0 else log_floor for value in values]
+        plotted_identity = [
+            value if value > 0 else log_floor for value in identity_values
+        ]
         axis.barh(positions, plotted_values, color=colors)
+        identity_label = "Identity f(y)=y"
+        if any(value == 0 for value in identity_values):
+            identity_label += ": 0 (shown at log floor)"
+        axis.vlines(
+            plotted_identity,
+            [position - 0.36 for position in positions],
+            [position + 0.36 for position in positions],
+            color="black",
+            linewidth=1.0,
+            zorder=4,
+            label=identity_label,
+        )
         axis.set_title(panel_title)
         axis.set_xlabel(axis_label)
         axis.set_xscale("log")
+        axis.set_axisbelow(True)
         axis.grid(axis="x", which="both", alpha=0.25)
+        axis.legend(loc="best", fontsize=8)
     axes[0].set_yticks(positions, labels)
     axes[0].invert_yaxis()
     figure.suptitle(title)

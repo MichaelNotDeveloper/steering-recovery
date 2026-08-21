@@ -42,6 +42,7 @@ def test_all_primary_configs_compose():
     assert steering_benchmark.model.name == "gpt2"
     assert steering_benchmark.model.dtype == "float32"
     assert steering_benchmark.model.layer_index == 5
+    assert list(steering_benchmark.alphas) == [0.0, 1.0, 2.0, 3.0, 4.0]
     assert steering_benchmark.generation.samples_per_point == 100
     assert steering_benchmark.generation.prompt_tokens == 24
     assert steering_benchmark.generation.new_tokens == 40

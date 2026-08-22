@@ -140,11 +140,24 @@ probability против Dist-3 с интерактивной HTML-галере�
 `alpha`, а вокруг точек показывается 95% bootstrap CI. Подробности и формат результатов:
 [документация по бенчмаркам](docs/steering_benchmarks.md).
 
+MC-dropout эксперимент необычности steered hidden states:
+
+```bash
+python train_denoiser.py experiment=epistemic_dropout
+python run_epistemic_steering.py denoiser_run_dir=/path/to/training/run
+```
+
+Первый этап обучает три `3 × 3072` denoiser с `dropout=0.1` для
+`sigma=[0.1,0.2,0.5]`. Второй прогоняет каждый steered hidden 20 раз, сохраняет
+четыре меры разброса, строит графики и интерактивную токенную HTML-галерею.
+Подробности: [epistemic steering](docs/epistemic_steering.md).
+
 Все параметры можно переопределять из CLI. Подробности: [архитектура](docs/architecture.md),
 [обучение denoiser](docs/denoiser_training.md) и
 [генерация steering-векторов](docs/steering_vectors.md),
 [классификаторы тем](docs/topic_logistic_regression.md),
-[бенчмарки steering](docs/steering_benchmarks.md).
+[бенчмарки steering](docs/steering_benchmarks.md),
+[MC-dropout epistemic steering](docs/epistemic_steering.md).
 
 ## Проверки
 

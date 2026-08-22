@@ -38,6 +38,7 @@ def test_cpu_training_smoke(tmp_path):
                 "latent_dims": [4, 8],
                 "num_layers": [1],
                 "sigmas": [0.1, 0.2],
+                "dropout": 0.1,
             },
             "training": {
                 "epochs": 1,
@@ -71,6 +72,7 @@ def test_cpu_training_smoke(tmp_path):
     for directory in model_directories:
         bundle, metadata = load_checkpoint(directory / "best.pt")
         assert bundle.model.config.hidden_size == 6
+        assert bundle.model.config.dropout == 0.1
         assert metadata["step"] in {1, 2}
         assert (directory / "last.pt").is_file()
         assert (directory / "metrics.jsonl").is_file()
@@ -81,6 +83,7 @@ def test_cpu_training_smoke(tmp_path):
         ]
         assert sum(record["split"] == "validation" for record in records) == 2
         summary = json.loads((directory / "summary.json").read_text())
+        assert summary["parameters"]["dropout"] == 0.1
         assert summary["best_validation"]["l2"] >= 0
         assert summary["best_validation"]["score_mse"] >= 0
         assert summary["best_validation"]["score_rms"] >= 0

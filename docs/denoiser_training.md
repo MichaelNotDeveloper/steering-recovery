@@ -27,8 +27,14 @@ GPT-2 Small, его hidden states и весь train/validation denoiser рабо
 residual = Linear(hidden_size -> latent_dim, bias=True)
 residual = GELU(residual)
 residual = Linear(latent_dim -> hidden_size, bias=True)
+residual = Dropout(p=dropout)(residual)
 output = input + residual
 ```
+
+`model.dropout` задаёт dropout после второго Linear каждого residual block и по
+умолчанию равен `0.0`, поэтому прежняя архитектура и checkpoints остаются
+совместимыми. Dropout активен при обучении, отключён на обычной validation и
+может быть точечно включён для MC-dropout inference.
 
 `hidden_size=768` задаётся GPT-2 и не является параметром grid. Внутренняя
 размерность `latent_dim` перебирается как `[192, 768, 3072]`. Полная сетка:
@@ -43,6 +49,16 @@ output = input + residual
 получает этот же batch и `x + sigma * epsilon`. Так сравнение архитектур не
 зависит от разных текстов или разных реализаций Gaussian noise. Одинаковые
 архитектуры для разных `sigma` также получают одинаковую начальную инициализацию.
+
+Отдельный preset для epistemic-эксперимента оставляет только три модели:
+
+```bash
+python train_denoiser.py experiment=epistemic_dropout
+```
+
+Все три имеют `latent_dim=3072`, три residual block и `dropout=0.1`; различается
+только `sigma`: `0.1`, `0.2`, `0.5`. Подробный второй этап эксперимента описан в
+[epistemic steering benchmark](epistemic_steering.md).
 
 ## Подготовка и запуск
 
@@ -159,6 +175,9 @@ run/
 `best.pt` содержит лучшие веса по validation L2. `last.pt` дополнительно
 содержит optimizer state последнего шага. `metrics.jsonl` хранит всю историю
 train/validation, а `summary.json` — параметры и лучшие validation-метрики.
+Параметр `dropout` входит в checkpoint, `model_config.json`, summary и таблицу
+`compare_denoisers.py`; для старых checkpoint/summary без этого поля принимается
+`dropout=0`.
 Новый прямой denoiser использует checkpoint format version 2; checkpoint старой
 модели, которая предсказывала corruption, с ним несовместим.
 

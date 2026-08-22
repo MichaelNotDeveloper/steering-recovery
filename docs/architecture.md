@@ -20,6 +20,7 @@ steering-recovery/
 ├── generate_steering_vectors.py # Hydra-entrypoint поиска steering-векторов
 ├── train_topic_logistic_regressions.py # отдельное обучение AG News classifiers
 ├── run_steering_benchmarks.py # benchmark alpha × vector × method
+├── run_epistemic_steering.py # MC-dropout uncertainty steered hidden states
 ├── train_denoiser.py          # Hydra-entrypoint обучения
 ├── run_baselines.py           # Hydra-entrypoint генерации
 ├── configs/
@@ -28,6 +29,7 @@ steering-recovery/
 │   ├── baseline.yaml
 │   ├── steering_vectors.yaml
 │   ├── topic_logistic_regression.yaml
+│   ├── epistemic_steering.yaml
 │   └── experiment/            # готовые параметры multirun
 ├── steering_recovery/
 │   ├── cache.py               # hook и запись .npy shards
@@ -46,6 +48,7 @@ steering-recovery/
 │   │   ├── logistic.py        # balanced reservoir, epoch L2 classifiers, AUC
 │   │   ├── ag_news_logistic.py # orchestration отдельного classifier run
 │   │   ├── logistic_reporting.py # HTML токенных вероятностей
+│   │   ├── epistemic/         # MC generation, statistics, plots и HTML
 │   │   ├── artifacts.py       # .pt-векторы и manifest с метаданными
 │   │   ├── pipeline.py        # registry/dispatch генераторов
 │   │   └── benchmarking/      # генерация, scoring, CI и scatter-plots
@@ -76,6 +79,9 @@ flowchart LR
     L --> R["Balanced hidden reservoir"]
     R --> S["Epoch L2 logistic regressions"]
     S --> T["Loss + ROC-AUC + AUC-PRC + token HTML"]
+    N --> U["h + αv"]
+    U --> V["20 MC-dropout denoiser predictions"]
+    V --> W["Score/prediction dispersion plots + token HTML"]
 ```
 
 ## Форматы данных
@@ -141,9 +147,10 @@ teacher-forced extractor и останавливается ровно после
 шага создаётся один `epsilon ~ N(0, I)`; варианты получают
 `x_noisy = x + sigma * epsilon` и учатся напрямую восстанавливать `x` по MSE.
 
-Residual block состоит только из
-`Linear(768, latent_dim, bias=True) → GELU → Linear(latent_dim, 768, bias=True)`
-и skip connection. Внутреннего LayerNorm нет. Grid содержит 27 моделей:
+Residual block состоит из
+`Linear(768, latent_dim) → GELU → Linear(latent_dim, 768) → Dropout(p)` и skip
+connection. Внутреннего LayerNorm нет; по умолчанию `p=0`, поэтому основной grid
+содержит прежние 27 моделей:
 `latent_dim=[192,768,3072]`, `num_layers=[1,3,5]`,
 `sigma=[0.1,0.2,0.5]`.
 
@@ -189,6 +196,13 @@ Benchmark runner использует сохранённые направлен�
 AG News prompts и строит отдельный график для каждой пары vector/method. Метрики,
 resume-формат и подключение post-steering checkpoint описаны в
 [документации бенчмарка](steering_benchmarks.md).
+
+Epistemic benchmark использует отдельные `3 × 3072` denoiser с `dropout=0.1`.
+Для каждого `sigma × vector × alpha` он генерирует продолжения, прогоняет каждый
+steered hidden через denoiser 20 раз и вставляет в GPT среднее предсказание.
+Разброс `D(z)-z` и самих `D(z)` агрегируется в графики и сохраняется на уровне
+токенов для интерактивной HTML-подсветки. Формулы и запуск описаны в
+[отдельном документе](epistemic_steering.md).
 
 ### Prompts
 

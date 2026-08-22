@@ -1,0 +1,62 @@
+seed: 2026
+device: auto
+resume: true
+
+dataset:
+  name: sh0416/ag_news
+  config: null
+  split: test
+  text_column: description
+  label_column: label
+  streaming: false
+  shuffle: true
+  shuffle_buffer_size: 10000
+
+model:
+  name: gpt2
+  tokenizer_name: gpt2
+  dtype: float32
+  trust_remote_code: false
+  layer_path: transformer.h
+  layer_index: 5
+
+steering_vectors_path: data/steering_vectors/ag_news/gpt2_layer_5/steering_vectors.pt
+
+# Output directory returned by: python train_denoiser.py experiment=epistemic_dropout
+denoiser_run_dir: null
+checkpoint_name: best.pt
+denoisers:
+  - sigma: 0.1
+    model_directory: latent_3072_layers_3_sigma_0p1_dropout_0p1
+  - sigma: 0.2
+    model_directory: latent_3072_layers_3_sigma_0p2_dropout_0p1
+  - sigma: 0.5
+    model_directory: latent_3072_layers_3_sigma_0p5_dropout_0p1
+
+alphas: [6.0, 8.0, 10.0, 20.0]
+
+mc_dropout:
+  samples: 20
+  expected_dropout: 0.1
+
+generation:
+  samples_per_condition: 100
+  prompt_tokens: 24
+  new_tokens: 40
+  temperature: 0.7
+  top_p: 0.95
+  stop_on_eos: false
+
+examples:
+  # One example per source AG News class for every sigma/vector/alpha condition.
+  per_condition: 4
+
+plot:
+  formats: [png]
+  dpi: 180
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: runs/epistemic-steering/${now:%Y-%m-%d}/${now:%H-%M-%S}

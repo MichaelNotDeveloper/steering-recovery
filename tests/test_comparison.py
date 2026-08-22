@@ -32,6 +32,7 @@ def test_comparison_writes_table_and_barplot(tmp_path, monkeypatch):
                 "latent_dim": 192,
                 "num_layers": index + 1,
                 "sigma": sigma,
+                "dropout": 0.1,
             },
             "best_step": 10,
             "best_validation": {
@@ -58,6 +59,9 @@ def test_comparison_writes_table_and_barplot(tmp_path, monkeypatch):
     assert set(result["plots_by_sigma"]) == {"0.1", "0.2"}
     assert (output / "denoiser_comparison_sigma_0p1.png").stat().st_size > 0
     assert (output / "denoiser_comparison_sigma_0p2.png").stat().st_size > 0
+    csv_text = (output / "denoiser_comparison.csv").read_text()
+    assert "dropout" in csv_text
+    assert ",0.1," in csv_text
     assert scales == ["log"] * 12
     assert len(identity_ticks) == 12
     assert identity_ticks[0][0] == [0.1**2, 0.2**2]

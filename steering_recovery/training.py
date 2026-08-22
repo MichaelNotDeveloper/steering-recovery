@@ -44,6 +44,7 @@ class ModelRun:
     latent_dim: int
     num_layers: int
     sigma: float
+    dropout: float
     bundle: DenoiserBundle
     optimizer: torch.optim.Optimizer
     directory: Path
@@ -58,6 +59,7 @@ class ModelRun:
             "latent_dim": self.latent_dim,
             "num_layers": self.num_layers,
             "sigma": self.sigma,
+            "dropout": self.dropout,
         }
 
 
@@ -186,6 +188,7 @@ def _create_model_runs(
     latent_dims = [int(value) for value in config.model.latent_dims]
     layer_counts = [int(value) for value in config.model.num_layers]
     sigmas = [float(value) for value in config.model.sigmas]
+    dropout = float(config.model.get("dropout", 0.0))
     if not latent_dims or not layer_counts or not sigmas:
         raise ValueError(
             "model.latent_dims, model.num_layers and model.sigmas are required"
@@ -200,6 +203,8 @@ def _create_model_runs(
         raise ValueError("latent dimensions and layer counts must be positive")
     if any(value <= 0 for value in sigmas):
         raise ValueError("all model.sigmas must be positive")
+    if not 0 <= dropout < 1:
+        raise ValueError("model.dropout must be in [0, 1)")
 
     runs: list[ModelRun] = []
     for sigma in sigmas:
@@ -209,6 +214,8 @@ def _create_model_runs(
                     f"latent_{latent_dim}_layers_{num_layers}_"
                     f"sigma_{_sigma_slug(sigma)}"
                 )
+                if dropout > 0:
+                    name += f"_dropout_{_sigma_slug(dropout)}"
                 directory = ensure_output_dir(output_dir / "models" / name)
                 architecture_seed = (
                     int(config.seed) + latent_dim * 101 + num_layers * 1_000_003
@@ -219,6 +226,7 @@ def _create_model_runs(
                         hidden_size=hidden_size,
                         latent_dim=latent_dim,
                         num_layers=num_layers,
+                        dropout=dropout,
                     )
                 bundle = DenoiserBundle(
                     model,
@@ -235,6 +243,7 @@ def _create_model_runs(
                     latent_dim=latent_dim,
                     num_layers=num_layers,
                     sigma=sigma,
+                    dropout=dropout,
                     bundle=bundle,
                     optimizer=optimizer,
                     directory=directory,
@@ -422,8 +431,7 @@ def train_denoiser(config: DictConfig, output_dir: str | Path) -> dict[str, Any]
             and str(config.training.precision) != "fp32"
         ):
             raise ValueError(
-                "GPT-2 Small denoiser experiments require "
-                "training.precision=fp32"
+                "GPT-2 Small denoiser experiments require training.precision=fp32"
             )
         train_loader, val_loader = build_streaming_activation_datasets(
             config.data,

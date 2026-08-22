@@ -16,7 +16,7 @@ from steering_recovery.normalization import ActivationNormalizer
 
 
 def test_residual_block_has_the_requested_architecture():
-    block = ResidualBlock(hidden_size=6, latent_dim=8)
+    block = ResidualBlock(hidden_size=6, latent_dim=8, dropout=0.1)
     assert isinstance(block.network[0], nn.Linear)
     assert block.network[0].in_features == 6
     assert block.network[0].out_features == 8
@@ -26,6 +26,8 @@ def test_residual_block_has_the_requested_architecture():
     assert block.network[2].in_features == 8
     assert block.network[2].out_features == 6
     assert block.network[2].bias is not None
+    assert isinstance(block.network[3], nn.Dropout)
+    assert block.network[3].p == 0.1
     assert not any(isinstance(module, nn.LayerNorm) for module in block.modules())
 
 
@@ -40,9 +42,10 @@ def test_denoiser_preserves_2d_and_3d_shapes_and_backpropagates():
 
 
 def test_bundle_normalizes_and_checkpoint_roundtrips(tmp_path):
-    model = ActivationDenoiser(hidden_size=4, latent_dim=8, num_layers=1)
+    model = ActivationDenoiser(hidden_size=4, latent_dim=8, num_layers=1, dropout=0.1)
     normalizer = ActivationNormalizer(torch.arange(4.0), torch.ones(4) * 2)
     bundle = DenoiserBundle(model, normalizer)
+    bundle.eval()
     values = torch.randn(2, 4)
     expected = bundle.denoise(values)
 
@@ -52,6 +55,21 @@ def test_bundle_normalizes_and_checkpoint_roundtrips(tmp_path):
     assert metadata["format_version"] == 2
     assert metadata["step"] == 3
     assert loaded.model_config == bundle.model_config
+    assert loaded.model.config.dropout == 0.1
+
+
+def test_checkpoint_without_dropout_field_remains_loadable(tmp_path):
+    bundle = DenoiserBundle(
+        ActivationDenoiser(hidden_size=4, latent_dim=8, num_layers=1),
+        ActivationNormalizer(torch.zeros(4), torch.ones(4)),
+    ).eval()
+    path = save_checkpoint(tmp_path / "current.pt", bundle, step=1, epoch=0)
+    payload = torch.load(path, weights_only=True)
+    payload["model_config"].pop("dropout")
+    legacy_path = tmp_path / "legacy.pt"
+    torch.save(payload, legacy_path)
+    loaded, _ = load_checkpoint(legacy_path)
+    assert loaded.model.config.dropout == 0.0
 
 
 def test_gpt2_denoiser_precision_provenance_is_required():
@@ -63,9 +81,7 @@ def test_gpt2_denoiser_precision_provenance_is_required():
             }
         }
     }
-    validate_gpt2_small_denoiser_precision(
-        fp32_metadata, source_model_name="gpt2"
-    )
+    validate_gpt2_small_denoiser_precision(fp32_metadata, source_model_name="gpt2")
     reduced_metadata = {
         "config": {
             "experiment": {

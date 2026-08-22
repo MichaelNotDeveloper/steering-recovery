@@ -10,16 +10,19 @@ from steering_recovery.normalization import ActivationNormalizer
 
 
 class ResidualBlock(nn.Module):
-    """Unnormalised residual MLP: Linear -> GELU -> Linear."""
+    """Unnormalised residual MLP: Linear -> GELU -> Linear -> Dropout."""
 
-    def __init__(self, hidden_size: int, latent_dim: int):
+    def __init__(self, hidden_size: int, latent_dim: int, dropout: float = 0.0):
         super().__init__()
         if hidden_size <= 0 or latent_dim <= 0:
             raise ValueError("hidden_size and latent_dim must be positive")
+        if not 0 <= dropout < 1:
+            raise ValueError("dropout must be in [0, 1)")
         self.network = nn.Sequential(
             nn.Linear(hidden_size, latent_dim, bias=True),
             nn.GELU(),
             nn.Linear(latent_dim, hidden_size, bias=True),
+            nn.Dropout(float(dropout)),
         )
 
     def forward(self, hidden: torch.Tensor) -> torch.Tensor:
@@ -31,6 +34,7 @@ class DenoiserConfig:
     hidden_size: int
     latent_dim: int = 768
     num_layers: int = 3
+    dropout: float = 0.0
 
 
 class ActivationDenoiser(nn.Module):
@@ -41,6 +45,7 @@ class ActivationDenoiser(nn.Module):
         hidden_size: int,
         latent_dim: int = 768,
         num_layers: int = 3,
+        dropout: float = 0.0,
     ):
         super().__init__()
         if hidden_size <= 0 or latent_dim <= 0 or num_layers <= 0:
@@ -49,9 +54,13 @@ class ActivationDenoiser(nn.Module):
             hidden_size=int(hidden_size),
             latent_dim=int(latent_dim),
             num_layers=int(num_layers),
+            dropout=float(dropout),
         )
         self.blocks = nn.ModuleList(
-            [ResidualBlock(hidden_size, latent_dim) for _ in range(num_layers)]
+            [
+                ResidualBlock(hidden_size, latent_dim, dropout=dropout)
+                for _ in range(num_layers)
+            ]
         )
 
     def forward(self, noisy_activations: torch.Tensor) -> torch.Tensor:

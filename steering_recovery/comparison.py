@@ -13,6 +13,7 @@ class ComparisonRow:
     latent_dim: int
     num_layers: int
     sigma: float
+    dropout: float
     best_step: int
     l2: float
     rmse: float
@@ -53,6 +54,7 @@ def collect_comparison_rows(root: str | Path) -> list[ComparisonRow]:
                 latent_dim=int(parameters["latent_dim"]),
                 num_layers=int(parameters["num_layers"]),
                 sigma=float(parameters["sigma"]),
+                dropout=float(parameters.get("dropout", 0.0)),
                 best_step=int(payload["best_step"]),
                 l2=float(metrics["l2"]),
                 rmse=float(metrics["rmse"]),
@@ -93,14 +95,14 @@ def write_comparison(root: str | Path, output_dir: str | Path) -> dict[str, Any]
         writer.writerows(row.as_dict() for row in rows)
 
     markdown_lines = [
-        "| model | latent_dim | layers | sigma | best step | L2 | RMSE | cosine distance | score RMS |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| model | latent_dim | layers | sigma | dropout | best step | L2 | RMSE | cosine distance | score RMS |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in rows:
         score_rms = f"{row.score_rms:.8g}" if row.score_rms is not None else "n/a"
         markdown_lines.append(
             f"| {row.name} | {row.latent_dim} | {row.num_layers} | "
-            f"{row.sigma:g} | {row.best_step} | {row.l2:.8g} | "
+            f"{row.sigma:g} | {row.dropout:g} | {row.best_step} | {row.l2:.8g} | "
             f"{row.rmse:.8g} | {row.cosine_distance:.8g} | {score_rms} |"
         )
     markdown_path.write_text("\n".join(markdown_lines) + "\n", encoding="utf-8")
@@ -149,6 +151,8 @@ def _write_barplot(
     labels = []
     for row in rows:
         label = f"L={row.latent_dim}, blocks={row.num_layers}"
+        if row.dropout > 0:
+            label += f", dropout={row.dropout:g}"
         if include_sigma_in_labels:
             label += f", σ={row.sigma:g}"
         labels.append(label)

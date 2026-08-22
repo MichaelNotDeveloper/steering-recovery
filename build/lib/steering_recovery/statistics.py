@@ -10,7 +10,12 @@ import torch
 from omegaconf import DictConfig
 from tqdm import tqdm
 
-from steering_recovery.runtime import resolve_device, resolve_dtype, seed_everything
+from steering_recovery.runtime import (
+    dtype_name,
+    resolve_device,
+    resolve_model_dtype,
+    seed_everything,
+)
 from steering_recovery.streaming_data import (
     HuggingFaceTextStream,
     TeacherForcedActivationIterableDataset,
@@ -151,6 +156,9 @@ def collect_hidden_statistics(config: DictConfig) -> dict[str, Any]:
         raise ValueError("collection.batch_tokens must be positive")
 
     source = config.source
+    model_dtype = resolve_model_dtype(
+        str(source.model_name), str(source.model_dtype), device
+    )
     extractor = load_teacher_forced_source(
         model_name=str(source.model_name),
         tokenizer_name=source.tokenizer_name,
@@ -158,7 +166,7 @@ def collect_hidden_statistics(config: DictConfig) -> dict[str, Any]:
         layer_path=source.layer_path,
         max_length=int(source.max_length),
         device=device,
-        dtype=resolve_dtype(str(source.model_dtype), device),
+        dtype=model_dtype,
         trust_remote_code=bool(source.trust_remote_code),
     )
     dataset_config = config.dataset
@@ -215,6 +223,7 @@ def collect_hidden_statistics(config: DictConfig) -> dict[str, Any]:
             "layer_path": source.layer_path,
             "layer_index": int(source.layer_index),
             "max_length": int(source.max_length),
+            "model_dtype": dtype_name(model_dtype),
         },
         "dataset": {
             "name": str(dataset_config.name),

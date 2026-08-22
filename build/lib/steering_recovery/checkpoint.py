@@ -8,6 +8,7 @@ import torch
 
 from steering_recovery.denoiser import ActivationDenoiser, DenoiserBundle
 from steering_recovery.normalization import ActivationNormalizer
+from steering_recovery.runtime import is_gpt2_small_model
 
 
 def save_checkpoint(
@@ -73,3 +74,29 @@ def load_checkpoint(
         if key not in {"model_state", "normalizer_state"}
     }
     return bundle, metadata
+
+
+def validate_gpt2_small_denoiser_precision(
+    metadata: Mapping[str, Any], *, source_model_name: str
+) -> None:
+    """Reject denoisers trained from reduced-precision GPT-2 Small states."""
+
+    if not is_gpt2_small_model(source_model_name):
+        return
+    config = metadata.get("config")
+    experiment = config.get("experiment") if isinstance(config, Mapping) else None
+    data = experiment.get("data") if isinstance(experiment, Mapping) else None
+    streaming = data.get("streaming") if isinstance(data, Mapping) else None
+    training = experiment.get("training") if isinstance(experiment, Mapping) else None
+    source_dtype = (
+        streaming.get("model_dtype") if isinstance(streaming, Mapping) else None
+    )
+    training_precision = (
+        training.get("precision") if isinstance(training, Mapping) else None
+    )
+    if source_dtype not in {"float32", "fp32"} or training_precision != "fp32":
+        raise ValueError(
+            "GPT-2 Small experiments require a denoiser trained entirely in "
+            "float32; retrain this checkpoint with source model_dtype=float32 "
+            "and training.precision=fp32"
+        )

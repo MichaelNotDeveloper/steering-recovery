@@ -32,7 +32,7 @@ methods:
     intervention_mode: every_step
     denoiser_checkpoint: null
 
-alphas: [0.0, 1.0, 2.0, 3.0, 4.0]
+alphas: [2.0, 4.0, 6.0, 8.0, 10.0]
 
 generation:
   samples_per_point: 100

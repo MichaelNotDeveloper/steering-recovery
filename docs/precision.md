@@ -33,6 +33,7 @@
 Старые summary, plots и checkpoints нельзя сравнивать с новым прогоном как
 результаты одного precision-режима.
 
-Каталоги `data/`, `runs/` и `comparison/` не хранятся в Git. После клонирования
-все hidden statistics, steering-векторы, denoiser checkpoints, benchmark runs и
-сравнительные отчёты нужно получить полным FP32-пайплайном по цепочке выше.
+Из `data/` в Git хранится только канонический
+`data/gpt2_layer_5_statistics.pt`. Steering-векторы, `runs/` и `comparison/`
+остаются локальными: после клонирования их нужно получить FP32-пайплайном по
+цепочке выше.

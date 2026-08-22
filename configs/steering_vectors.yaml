@@ -24,6 +24,14 @@ source:
   layer_path: h
   layer_index: 5
 
+extraction:
+  # Default: no prompt; collect h[5] for every token of each article body.
+  # Use prompt_last_token to reproduce the earlier "... mainly about" method.
+  mode: full_text_all_tokens
+  # GPT-2 Small context limit. AG News descriptions normally fit completely.
+  max_length: 1024
+
+# Used only when extraction.mode=prompt_last_token.
 prompt:
   prefix: "Article: "
   suffix: "\nThis article is mainly about"
@@ -31,8 +39,15 @@ prompt:
   expected_last_token: about
 
 collection:
+  # Article quota. The number of collected hidden states is the token count.
   samples_per_topic: 1000
   batch_size: 32
+
+logistic_regression:
+  # Trains four one-vs-rest classifiers on the same token hiddens in one pass.
+  enabled: true
+  learning_rate: 0.001
+  l2_strength: 0.0001
 
 output_dir: data/steering_vectors/ag_news/gpt2_layer_${source.layer_index}
 

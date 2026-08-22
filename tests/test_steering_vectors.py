@@ -6,15 +6,19 @@ from torch import nn
 from steering_recovery.steering.artifacts import save_steering_artifacts
 from steering_recovery.steering.ag_news import ag_news_one_vs_rest_contrasts
 from steering_recovery.steering.core import (
+    AllTokenHiddenExtractor,
     ContrastDefinition,
+    FullTextTokenBuilder,
     HiddenMoments,
     LabeledText,
     LastTokenHiddenExtractor,
     PromptTokenBuilder,
     TopicDefinition,
     collect_group_moments,
+    collect_group_token_moments,
     compute_contrasts,
 )
+from steering_recovery.steering.logistic import OneVsRestLogisticTrainer
 
 
 class CharacterTokenizer:
@@ -39,6 +43,23 @@ class NumericExtractor:
             [[tokens[0], tokens[0] * 10] for tokens in token_sequences],
             dtype=torch.float32,
         )
+
+
+class NumericAllTokenExtractor:
+    hidden_size = 2
+
+    def __call__(self, token_sequences):
+        return [
+            torch.tensor(
+                [[token, token * 10] for token in tokens], dtype=torch.float32
+            )
+            for tokens in token_sequences
+        ]
+
+
+class NumericSequenceBuilder:
+    def __call__(self, text):
+        return tuple(int(value) for value in text.split(","))
 
 
 class OffsetLayer(nn.Module):
@@ -93,6 +114,25 @@ def test_last_token_extractor_captures_zero_based_layer_five():
     torch.testing.assert_close(hidden, torch.tensor([[24.0, 24.0], [28.0, 28.0]]))
 
 
+def test_full_text_builder_and_extractor_capture_every_real_token():
+    builder = FullTextTokenBuilder(CharacterTokenizer(), max_length=3)
+    assert builder("abcd") == (ord("a"), ord("b"), ord("c"))
+    assert builder.metadata()["capture_position"] == "all_non_padding_tokens"
+    extractor = AllTokenHiddenExtractor(
+        TinyLayerModel(),
+        layer_index=5,
+        layer_path="h",
+        pad_token_id=99,
+        device=torch.device("cpu"),
+    )
+    hidden = extractor([(1, 2, 3), (7,)])
+    assert [tuple(chunk.shape) for chunk in hidden] == [(3, 2), (1, 2)]
+    torch.testing.assert_close(
+        hidden[0], torch.tensor([[22.0, 22.0], [23.0, 23.0], [24.0, 24.0]])
+    )
+    torch.testing.assert_close(hidden[1], torch.tensor([[28.0, 28.0]]))
+
+
 def test_collection_enforces_exact_group_quotas_and_computes_contrast():
     examples = [
         LabeledText(1, "1"),
@@ -121,6 +161,61 @@ def test_collection_enforces_exact_group_quotas_and_computes_contrast():
         results[0].steering_vector, torch.tensor([-4.0, -40.0])
     )
     assert results[0].positive_count == results[0].negative_count == 2
+
+
+def test_all_token_collection_uses_article_quotas_and_token_weighted_means():
+    examples = [
+        LabeledText(1, "1,3"),
+        LabeledText(1, "100"),
+        LabeledText(2, "5,7,9"),
+        LabeledText(2, "200"),
+    ]
+    observed = []
+    moments, article_counts = collect_group_token_moments(
+        examples,
+        token_builder=NumericSequenceBuilder(),
+        extractor=NumericAllTokenExtractor(),
+        target_articles={1: 1, 2: 1},
+        batch_size=2,
+        batch_observer=lambda chunks, labels: observed.append((chunks, labels)),
+    )
+    assert article_counts == {1: 1, 2: 1}
+    assert moments[1].count == 2
+    assert moments[2].count == 3
+    torch.testing.assert_close(moments[1].mean, torch.tensor([2.0, 20.0]).double())
+    torch.testing.assert_close(moments[2].mean, torch.tensor([7.0, 70.0]).double())
+    assert len(observed) == 1
+
+
+def test_one_pass_logistic_regressions_save_weights_and_loss_plot(tmp_path):
+    topics = (
+        TopicDefinition(1, "First", "first"),
+        TopicDefinition(2, "Second", "second"),
+    )
+    trainer = OneVsRestLogisticTrainer(
+        hidden_size=2,
+        topics=topics,
+        learning_rate=0.01,
+        l2_strength=0.001,
+    )
+    trainer.update(
+        [torch.tensor([[1.0, 0.0], [2.0, 0.0]]), torch.tensor([[0.0, 1.0]])],
+        [1, 2],
+    )
+    artifacts = trainer.save(tmp_path, metadata={"source": {"layer_index": 5}})
+    payload = torch.load(tmp_path / "logistic_regressions.pt", weights_only=True)
+    assert payload["weights"].shape == (2, 2)
+    torch.testing.assert_close(payload["steering_vectors"], payload["weights"])
+    assert payload["bias"].shape == (2,)
+    assert payload["training"]["epochs"] == 1
+    assert payload["training"]["validation"] is False
+    assert artifacts["steps"] == 1
+    assert (tmp_path / "logistic_first.pt").is_file()
+    assert (tmp_path / "logistic_second.pt").is_file()
+    assert (tmp_path / "logistic_regression_loss.json").is_file()
+    assert (tmp_path / "logistic_regression_loss.png").is_file()
+    first = torch.load(tmp_path / "logistic_first.pt", weights_only=True)
+    torch.testing.assert_close(first["steering_vector"], first["weight"])
 
 
 def test_ag_news_defines_four_balanced_one_vs_rest_contrasts():

@@ -33,16 +33,20 @@ def test_all_primary_configs_compose():
     assert steering_vectors.generator == "ag_news"
     assert steering_vectors.source.layer_index == 5
     assert steering_vectors.source.model_dtype == "float32"
+    assert steering_vectors.extraction.mode == "full_text_all_tokens"
+    assert steering_vectors.extraction.max_length == 1024
     assert steering_vectors.prompt.article_tokens == 48
     assert steering_vectors.prompt.prefix == "Article: "
     assert steering_vectors.prompt.suffix.endswith("about")
     assert steering_vectors.prompt.expected_last_token == "about"
     assert steering_vectors.collection.samples_per_topic == 1000
+    assert steering_vectors.logistic_regression.enabled is True
+    assert steering_vectors.logistic_regression.l2_strength > 0
     assert steering_vectors.output_dir.startswith("data/")
     assert steering_benchmark.model.name == "gpt2"
     assert steering_benchmark.model.dtype == "float32"
     assert steering_benchmark.model.layer_index == 5
-    assert list(steering_benchmark.alphas) == [0.0, 1.0, 2.0, 3.0, 4.0]
+    assert list(steering_benchmark.alphas) == [2.0, 4.0, 6.0, 8.0, 10.0]
     assert steering_benchmark.generation.samples_per_point == 100
     assert steering_benchmark.generation.prompt_tokens == 24
     assert steering_benchmark.generation.new_tokens == 40

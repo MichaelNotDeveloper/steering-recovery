@@ -40,6 +40,7 @@ steering-recovery/
 │   ├── steering/              # генерация векторов и бенчмарки steering
 │   │   ├── core.py            # prompt, hook, квоты групп и contrasts
 │   │   ├── ag_news.py         # адаптер и one-vs-rest темы AG News
+│   │   ├── logistic.py        # one-pass L2 logistic regressions и loss plot
 │   │   ├── artifacts.py       # .pt-векторы и manifest с метаданными
 │   │   ├── pipeline.py        # registry/dispatch генераторов
 │   │   └── benchmarking/      # генерация, scoring, CI и scatter-plots
@@ -166,10 +167,11 @@ map.
 активациями.
 
 Генераторы и будущие бенчмарки steering изолированы в
-`steering_recovery/steering/`. Первый генератор строит четыре AG News
-направления как `mean(topic) - mean(other topics)` по hidden последнего токена
-prompt на выходе `h[5]` GPT-2. Детальный формат артефактов и запуск описаны в
-[отдельном документе](steering_vectors.md).
+`steering_recovery/steering/`. AG News generator строит четыре направления как
+`mean(topic tokens) - mean(other topic tokens)` по всем hidden полного текста на
+выходе `h[5]` GPT-2. В том же проходе опционально обучаются четыре one-vs-rest
+L2 logistic regression без validation. Детальный формат артефактов и запуск
+описаны в [отдельном документе](steering_vectors.md).
 
 Benchmark runner использует сохранённые направления, один общий набор из 100
 AG News prompts и строит отдельный график для каждой пары vector/method. Метрики,

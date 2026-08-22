@@ -7,7 +7,8 @@ __pycache__/
 htmlcov/
 .venv/
 .hydra/
-data/
+data/*
+!data/gpt2_layer_5_statistics.pt
 runs/
 wandb/
 comparison/

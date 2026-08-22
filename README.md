@@ -112,9 +112,12 @@ Steering-векторы четырёх тем AG News (`World`, `Sports`, `Busin
 python generate_steering_vectors.py
 ```
 
-Команда собирает по 1000 состояний каждой темы и сохраняет отдельные векторы и
-полные метаданные в `data/steering_vectors/ag_news/gpt2_layer_5/`. Формат,
-точный prompt и расширение пайплайна описаны в
+Команда обрабатывает по 1000 статей каждой темы и сохраняет отдельные векторы и
+полные метаданные в `data/steering_vectors/ag_news/gpt2_layer_5/`. По умолчанию
+Difference of Means использует hidden всех токенов полного текста. В том же
+GPT-2 проходе опционально обучаются четыре one-vs-rest L2 logistic regression и
+сохраняется график training loss. Формат, старый prompt-режим и расширение
+пайплайна описаны в
 [документации по steering-векторам](docs/steering_vectors.md).
 
 Бенчмарк силы steering и post-steering denoiser:

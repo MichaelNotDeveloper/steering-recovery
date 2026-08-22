@@ -664,8 +664,11 @@ def run_steering_benchmark(
     unigram_cache_path = output_dir / "metrics" / "slor_unigram.pt"
     if slor_needed:
         slor_dtype = resolve_dtype(str(config.slor.dtype), device)
-        if slor_dtype != torch.float32:
-            raise ValueError("steering benchmark SLOR model must use float32")
+        if slor_dtype != torch.float16:
+            raise ValueError(
+                "steering benchmark SLOR model requires float16 inference; "
+                "run it on an FP16-capable accelerator"
+            )
         slor_scorer = CausalLMSLORScorer.from_pretrained(
             str(config.slor.model_name),
             tokenizer_name=str(config.slor.tokenizer_name),

@@ -64,8 +64,8 @@ metrics:
 slor:
   model_name: gpt2-large
   tokenizer_name: gpt2-large
-  # Keep LM probabilities reproducible and avoid reduced-precision score drift.
-  dtype: float32
+  # GPT-2 Large weights and forward pass use FP16 to reduce benchmark memory.
+  dtype: float16
   trust_remote_code: false
   batch_size: 4
   unigram:

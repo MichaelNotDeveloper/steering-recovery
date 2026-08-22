@@ -60,7 +60,7 @@ def test_all_primary_configs_compose():
     assert steering_benchmark.classifier.dtype == "float32"
     assert steering_benchmark.classifier.class_indices.world == 0
     assert steering_benchmark.slor.model_name == "gpt2-large"
-    assert steering_benchmark.slor.dtype == "float32"
+    assert steering_benchmark.slor.dtype == "float16"
     assert steering_benchmark.slor.unigram.split == "train"
 
 

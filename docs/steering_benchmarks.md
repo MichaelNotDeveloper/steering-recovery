@@ -27,10 +27,11 @@ post-steering denoiser на одной генеративной модели. В
 результат передаётся в `DenoiserBundle.denoise_steered`. При `alpha=0` hook не
 изменяет hidden и denoiser не вызывается: нулевая точка остаётся общей baseline.
 
-GPT-2 Small, post-steering denoiser, Frozen AG News classifier и GPT-2 Large для
-SLOR выполняются в `float32`. Перед запуском проверяется provenance
-steering-векторов и denoiser checkpoint: старые reduced-precision артефакты
-отклоняются с инструкцией по пересчёту.
+GPT-2 Small, post-steering denoiser и Frozen AG News classifier выполняются в
+`float32`. GPT-2 Large для SLOR использует `float16`, чтобы уменьшить память во
+время отдельного metric-pass; log-softmax reduction переводится в `float32`.
+Перед запуском проверяется provenance steering-векторов и denoiser checkpoint:
+старые reduced-precision артефакты отклоняются с инструкцией по пересчёту.
 
 ## Промпты и генерация
 
@@ -80,7 +81,7 @@ n-грамм. Порядки задаются через `metrics.distinct_order
 
 ### Syntactic Log-Odds Ratio (SLOR)
 
-SLOR считается на GPT-2 BPE-токенах с помощью frozen `gpt2-large`:
+SLOR считается на GPT-2 BPE-токенах с помощью frozen `gpt2-large` в FP16:
 
 ```text
 SLOR = (Σ log p_gpt2-large(tᵢ | prompt, t<ᵢ) - Σ log p_unigram(tᵢ)) / N

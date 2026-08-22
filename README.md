@@ -135,9 +135,10 @@ AG News](docs/topic_logistic_regression.md).
 python run_steering_benchmarks.py
 ```
 
-Для каждой пары «AG News-вектор × метод» строится scatter-график target-class
-probability против Dist-3 с интерактивной HTML-галереей примеров. Цвет кодирует
-`alpha`, а вокруг точек показывается 95% bootstrap CI. Подробности и формат результатов:
+Для каждой пары «AG News-вектор × метод» строятся отдельные scatter-графики
+target-class probability против Dist-1, Dist-2, Dist-3 и SLOR на `gpt2-large`,
+а также интерактивная HTML-галерея примеров. Цвет кодирует `alpha`, вокруг точек
+показывается 95% bootstrap CI. Подробности и формат результатов:
 [документация по бенчмаркам](docs/steering_benchmarks.md).
 
 Все параметры можно переопределять из CLI. Подробности: [архитектура](docs/architecture.md),

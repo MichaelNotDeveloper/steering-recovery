@@ -58,8 +58,28 @@ classifier:
     sci_tech: 3
 
 metrics:
-  # Unique generated token trigrams / all 38 generated token trigrams.
-  distinct_n: 3
+  # Unique generated token n-grams / all available generated token n-grams.
+  distinct_orders: [1, 2, 3]
+
+slor:
+  model_name: gpt2-large
+  tokenizer_name: gpt2-large
+  # Keep LM probabilities reproducible and avoid reduced-precision score drift.
+  dtype: float32
+  trust_remote_code: false
+  batch_size: 4
+  unigram:
+    # SLOR's context-free baseline is estimated once from held-out AG News train
+    # descriptions, then cached under metrics/slor_unigram.pt in the run.
+    dataset_name: ${dataset.name}
+    dataset_config: ${dataset.config}
+    split: train
+    text_column: ${dataset.text_column}
+    streaming: false
+    batch_size: 256
+    smoothing: 1.0
+    # Set to an integer for a faster approximate unigram baseline.
+    max_documents: null
 
 statistics:
   confidence: 0.95

@@ -71,7 +71,7 @@ flowchart LR
     L --> M["Four one-vs-rest mean differences"]
     M --> N["data/steering_vectors + metadata"]
     N --> O["alpha × vector × post-steering method"]
-    O --> P["BERT probability + generated-token Dist-3"]
+    O --> P["BERT probability + Dist-1/2/3 + GPT-2 Large SLOR"]
     P --> Q["Bootstrap CI scatter-plots"]
     L --> R["Balanced hidden reservoir"]
     R --> S["Epoch L2 logistic regressions"]

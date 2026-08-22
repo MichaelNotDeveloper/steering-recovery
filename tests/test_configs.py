@@ -56,9 +56,12 @@ def test_all_primary_configs_compose():
     assert steering_benchmark.generation.samples_per_point == 100
     assert steering_benchmark.generation.prompt_tokens == 24
     assert steering_benchmark.generation.new_tokens == 40
-    assert steering_benchmark.metrics.distinct_n == 3
+    assert list(steering_benchmark.metrics.distinct_orders) == [1, 2, 3]
     assert steering_benchmark.classifier.dtype == "float32"
     assert steering_benchmark.classifier.class_indices.world == 0
+    assert steering_benchmark.slor.model_name == "gpt2-large"
+    assert steering_benchmark.slor.dtype == "float32"
+    assert steering_benchmark.slor.unigram.split == "train"
 
 
 def test_sweep_config_registers_parameter_grid():

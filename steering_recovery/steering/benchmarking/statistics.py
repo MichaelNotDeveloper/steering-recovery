@@ -34,6 +34,7 @@ def bootstrap_mean_interval(
 def summarize_condition(
     rows: Sequence[dict[str, object]],
     *,
+    metric_fields: Sequence[str],
     confidence: float,
     bootstrap_resamples: int,
     seed: int,
@@ -51,7 +52,6 @@ def summarize_condition(
         "target_dataset_label",
         "target_classifier_index",
         "alpha",
-        "distinct_n_order",
     )
     for field in stable_fields:
         if any(row[field] != first[field] for row in rows):
@@ -62,23 +62,27 @@ def summarize_condition(
         resamples=bootstrap_resamples,
         seed=seed,
     )
-    diversity = bootstrap_mean_interval(
-        [float(row["distinct_n"]) for row in rows],
-        confidence=confidence,
-        resamples=bootstrap_resamples,
-        seed=seed + 1,
-    )
-    return {
+    if not metric_fields or len(set(metric_fields)) != len(metric_fields):
+        raise ValueError("metric_fields must contain unique values")
+    result = {
         **{field: first[field] for field in stable_fields},
         "samples": len(rows),
         "confidence": confidence,
         "target_probability_mean": probability[0],
         "target_probability_ci_low": probability[1],
         "target_probability_ci_high": probability[2],
-        "distinct_n_mean": diversity[0],
-        "distinct_n_ci_low": diversity[1],
-        "distinct_n_ci_high": diversity[2],
         "mean_generated_tokens": float(
             np.mean([len(row["generated_token_ids"]) for row in rows])
         ),
     }
+    for offset, field in enumerate(metric_fields, start=1):
+        interval = bootstrap_mean_interval(
+            [float(row[field]) for row in rows],
+            confidence=confidence,
+            resamples=bootstrap_resamples,
+            seed=seed + offset,
+        )
+        result[f"{field}_mean"] = interval[0]
+        result[f"{field}_ci_low"] = interval[1]
+        result[f"{field}_ci_high"] = interval[2]
+    return result

@@ -39,12 +39,19 @@ from steering_recovery.steering.benchmarking.generation import (
     generate_steered_continuation,
 )
 from steering_recovery.steering.benchmarking.reporting import write_examples_html
-from steering_recovery.steering.benchmarking.scoring import FrozenAGNewsClassifier, distinct_n
+from steering_recovery.steering.benchmarking.scoring import (
+    CausalLMSLORScorer,
+    FrozenAGNewsClassifier,
+    distinct_n,
+    estimate_token_unigram_log_probabilities,
+)
 from steering_recovery.steering.benchmarking.statistics import summarize_condition
 
 
 LOGGER = logging.getLogger(__name__)
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
+_SLOR_FORMULA = "mean(log_p_causal_lm - log_p_token_unigram)"
+_SLOR_FORMULA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -259,15 +266,25 @@ def _write_summary_csv(rows: Sequence[dict[str, Any]], path: Path) -> None:
 def _write_examples_markdown(rows: Sequence[dict[str, Any]], path: Path) -> None:
     parts = ["# Steering benchmark examples", ""]
     for row in rows:
+        metric_parts = [
+            f"Dist-{order}: `{float(row[f'distinct_{order}']):.4f}`"
+            for order in (1, 2, 3)
+            if f"distinct_{order}" in row
+        ]
+        if "slor" in row:
+            metric_parts.append(f"SLOR: `{float(row['slor']):.4f}`")
         parts.extend(
             [
                 f"## {row['vector_name']} · {row['method']} · α={row['alpha']}",
                 "",
                 f"Source topic: `{row['source_topic']}` · sample: `{row['sample_id']}`",
                 "",
-                f"Target probability: `{float(row['target_probability']):.4f}` · "
-                f"Dist-{int(row['distinct_n_order'])}: "
-                f"`{float(row['distinct_n']):.4f}`",
+                " · ".join(
+                    [
+                        f"Target probability: `{float(row['target_probability']):.4f}`",
+                        *metric_parts,
+                    ]
+                ),
                 "",
                 "```text",
                 str(row["full_text"]),
@@ -276,6 +293,83 @@ def _write_examples_markdown(rows: Sequence[dict[str, Any]], path: Path) -> None
             ]
         )
     path.write_text("\n".join(parts), encoding="utf-8")
+
+
+def _load_or_estimate_slor_unigram(
+    config: Any,
+    scorer: CausalLMSLORScorer,
+    output_dir: Path,
+    *,
+    resume: bool,
+) -> tuple[torch.Tensor, dict[str, Any], str]:
+    unigram_config = config_to_dict(config.unigram)
+    signature = _signature(
+        {
+            "unigram": unigram_config,
+            "tokenizer_name": str(config.tokenizer_name),
+            "vocab_size": scorer.vocab_size,
+        }
+    )
+    cache_path = output_dir / "metrics" / "slor_unigram.pt"
+    if resume and cache_path.is_file():
+        payload = _safe_torch_load(cache_path)
+        cached_probabilities = payload.get("log_probabilities")
+        cached_metadata = payload.get("metadata")
+        if cached_probabilities is not None and isinstance(cached_metadata, Mapping):
+            probabilities = torch.as_tensor(cached_probabilities).float()
+            if (
+                payload.get("signature") == signature
+                and probabilities.shape == (scorer.vocab_size,)
+                and torch.isfinite(probabilities).all()
+            ):
+                return probabilities, dict(cached_metadata), signature
+
+    from datasets import load_dataset
+
+    dataset = load_dataset(
+        str(config.unigram.dataset_name),
+        config.unigram.dataset_config,
+        split=str(config.unigram.split),
+        streaming=bool(config.unigram.streaming),
+    )
+    text_column = str(config.unigram.text_column)
+    max_documents_value = config.unigram.max_documents
+    max_documents = (
+        None if max_documents_value is None else int(max_documents_value)
+    )
+    estimate = estimate_token_unigram_log_probabilities(
+        (
+            row.get(text_column)
+            for row in tqdm(dataset, desc="SLOR unigram corpus", unit="document")
+        ),
+        tokenizer=scorer.tokenizer,
+        vocab_size=scorer.vocab_size,
+        batch_size=int(config.unigram.batch_size),
+        smoothing=float(config.unigram.smoothing),
+        max_documents=max_documents,
+    )
+    metadata = {
+        "dataset_name": str(config.unigram.dataset_name),
+        "dataset_config": config.unigram.dataset_config,
+        "split": str(config.unigram.split),
+        "text_column": text_column,
+        "documents": estimate.documents,
+        "tokens": estimate.tokens,
+        "vocab_size": scorer.vocab_size,
+        "smoothing": float(config.unigram.smoothing),
+    }
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = cache_path.with_suffix(".tmp")
+    torch.save(
+        {
+            "signature": signature,
+            "log_probabilities": estimate.log_probabilities,
+            "metadata": metadata,
+        },
+        temporary,
+    )
+    os.replace(temporary, cache_path)
+    return estimate.log_probabilities, metadata, signature
 
 
 def run_steering_benchmark(
@@ -524,32 +618,109 @@ def run_steering_benchmark(
         _release_model(classifier)
         classifier = None
 
-    distinct_order = int(config.metrics.distinct_n)
-    if distinct_order <= 0:
-        raise ValueError("metrics.distinct_n must be positive")
-    distinct_signature = _signature({"distinct_n": distinct_order})
-    for path in tqdm(condition_files, desc=f"Dist-{distinct_order}", unit="condition"):
+    distinct_orders = [int(value) for value in config.metrics.distinct_orders]
+    if (
+        not distinct_orders
+        or any(order <= 0 for order in distinct_orders)
+        or len(set(distinct_orders)) != len(distinct_orders)
+    ):
+        raise ValueError("metrics.distinct_orders must contain unique positive values")
+    distinct_signature = _signature({"distinct_orders": distinct_orders})
+    distinct_fields = [f"distinct_{order}" for order in distinct_orders]
+    for path in tqdm(condition_files, desc="Dist-N metrics", unit="condition"):
         rows = _load_jsonl(path)
         changed = False
         for row in rows:
             if (
-                "distinct_n" not in row
-                or "distinct_n_order" not in row
+                any(field not in row for field in distinct_fields)
                 or row.get("distinct_n_signature") != distinct_signature
             ):
-                row["distinct_n"] = distinct_n(
-                    row["generated_token_ids"], distinct_order
-                )
-                row["distinct_n_order"] = distinct_order
+                for order, field in zip(distinct_orders, distinct_fields):
+                    row[field] = distinct_n(row["generated_token_ids"], order)
                 row["distinct_n_signature"] = distinct_signature
+                changed = True
+            if "distinct_n" in row or "distinct_n_order" in row:
+                row.pop("distinct_n", None)
+                row.pop("distinct_n_order", None)
                 changed = True
         if changed:
             _atomic_write_jsonl(rows, path)
 
+    slor_config_signature = _signature(
+        {
+            "formula_version": _SLOR_FORMULA_VERSION,
+            "config": config_to_dict(config.slor),
+        }
+    )
+    slor_needed = any(
+        any(
+            "slor" not in row
+            or row.get("slor_config_signature") != slor_config_signature
+            for row in _load_jsonl(path)
+        )
+        for path in condition_files
+    )
+    slor_metadata: dict[str, Any] = {}
+    unigram_cache_path = output_dir / "metrics" / "slor_unigram.pt"
+    if slor_needed:
+        slor_dtype = resolve_dtype(str(config.slor.dtype), device)
+        if slor_dtype != torch.float32:
+            raise ValueError("steering benchmark SLOR model must use float32")
+        slor_scorer = CausalLMSLORScorer.from_pretrained(
+            str(config.slor.model_name),
+            tokenizer_name=str(config.slor.tokenizer_name),
+            device=device,
+            dtype=slor_dtype,
+            trust_remote_code=bool(config.slor.trust_remote_code),
+        )
+        if tokenizer.get_vocab() != slor_scorer.tokenizer.get_vocab():
+            raise ValueError(
+                "generation and SLOR tokenizers must use the same token-to-id mapping"
+            )
+        unigram_log_probabilities, unigram_metadata, unigram_signature = (
+            _load_or_estimate_slor_unigram(
+                config.slor, slor_scorer, output_dir, resume=bool(config.resume)
+            )
+        )
+        slor_signature = _signature(
+            {
+                "formula_version": _SLOR_FORMULA_VERSION,
+                "slor": config_to_dict(config.slor),
+                "unigram_signature": unigram_signature,
+            }
+        )
+        slor_metadata["unigram"] = unigram_metadata
+        for path in tqdm(condition_files, desc="GPT-2 Large SLOR", unit="condition"):
+            rows = _load_jsonl(path)
+            if all(
+                "slor" in row and row.get("slor_signature") == slor_signature
+                for row in rows
+            ):
+                continue
+            scores = slor_scorer.score(
+                [row["prompt_token_ids"] for row in rows],
+                [row["generated_token_ids"] for row in rows],
+                unigram_log_probabilities=unigram_log_probabilities,
+                batch_size=int(config.slor.batch_size),
+            )
+            for row, score in zip(rows, scores):
+                row["slor"] = score
+                row["slor_signature"] = slor_signature
+                row["slor_config_signature"] = slor_config_signature
+            _atomic_write_jsonl(rows, path)
+        _release_model(slor_scorer)
+        slor_scorer = None
+    elif unigram_cache_path.is_file():
+        unigram_payload = _safe_torch_load(unigram_cache_path)
+        if isinstance(unigram_payload.get("metadata"), Mapping):
+            slor_metadata["unigram"] = dict(unigram_payload["metadata"])
+
     all_rows = [_load_jsonl(path) for path in condition_files]
+    metric_fields = [*distinct_fields, "slor"]
     summaries = [
         summarize_condition(
             rows,
+            metric_fields=metric_fields,
             confidence=float(config.statistics.confidence),
             bootstrap_resamples=int(config.statistics.bootstrap_resamples),
             seed=seed + index * 1009,
@@ -578,11 +749,13 @@ def run_steering_benchmark(
     plot_paths = plot_benchmark_series(
         summaries,
         output_dir / "plots",
+        distinct_orders=distinct_orders,
+        slor_model_name=str(config.slor.model_name),
         formats=[str(value) for value in config.plot.formats],
         dpi=int(config.plot.dpi),
     )
     result = {
-        "format_version": 1,
+        "format_version": 2,
         "output_dir": str(output_dir),
         "conditions": len(conditions),
         "generations_per_condition": len(prompts),
@@ -595,7 +768,16 @@ def run_steering_benchmark(
             "class_indices": class_indices,
             **classifier_metadata,
         },
-        "distinct_n_order": distinct_order,
+        "distinct_orders": distinct_orders,
+        "slor": {
+            "model_name": str(config.slor.model_name),
+            "tokenizer_name": str(config.slor.tokenizer_name),
+            "dtype": str(config.slor.dtype),
+            "formula": _SLOR_FORMULA,
+            "formula_version": _SLOR_FORMULA_VERSION,
+            "scope": "generated_tokens_conditioned_on_prompt",
+            **slor_metadata,
+        },
         "summary_files": ["summary.jsonl", "summary.csv"],
         "example_files": ["examples.jsonl", "examples.md", "examples.html"],
         "plots": [str(path.relative_to(output_dir)) for path in plot_paths],

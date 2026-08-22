@@ -80,7 +80,10 @@ def write_examples_html(
         const heading=document.createElement('div');heading.className='heading';
         const title=document.createElement('h2');title.textContent=`${row.vector_name} · ${row.method} · α=${row.alpha}`;heading.append(title);article.append(heading);
         const badges=document.createElement('div');badges.className='badges';
-        badges.append(badge(`source: ${row.source_topic}`),badge(`target p: ${Number(row.target_probability).toFixed(4)}`),badge(`Dist-${row.distinct_n_order}: ${Number(row.distinct_n).toFixed(4)}`),badge(`seed: ${row.seed}`));article.append(badges);
+        badges.append(badge(`source: ${row.source_topic}`),badge(`target p: ${Number(row.target_probability).toFixed(4)}`));
+        for(const order of [1,2,3])if(row[`distinct_${order}`]!==undefined)badges.append(badge(`Dist-${order}: ${Number(row[`distinct_${order}`]).toFixed(4)}`));
+        if(row.slor!==undefined)badges.append(badge(`SLOR: ${Number(row.slor).toFixed(4)}`));
+        badges.append(badge(`seed: ${row.seed}`));article.append(badges);
         const legend=document.createElement('div');legend.className='legend';legend.innerHTML='<span class="swatch prompt"></span>prompt <span class="swatch generated"></span>generated';article.append(legend);
         const text=document.createElement('pre');text.className='generation';
         const prompt=document.createElement('span');prompt.className='prompt';prompt.textContent=row.prompt_text;

@@ -11,6 +11,7 @@ def test_all_primary_configs_compose():
         cache = compose(config_name="cache_activations")
         statistics = compose(config_name="hidden_statistics")
         steering_vectors = compose(config_name="steering_vectors")
+        topic_logistic = compose(config_name="topic_logistic_regression")
         steering_benchmark = compose(config_name="steering_benchmark")
     assert list(denoiser.model.latent_dims) == [192, 768, 3072]
     assert list(denoiser.model.num_layers) == [1, 3, 5]
@@ -40,9 +41,14 @@ def test_all_primary_configs_compose():
     assert steering_vectors.prompt.suffix.endswith("about")
     assert steering_vectors.prompt.expected_last_token == "about"
     assert steering_vectors.collection.samples_per_topic == 1000
-    assert steering_vectors.logistic_regression.enabled is True
-    assert steering_vectors.logistic_regression.l2_strength > 0
     assert steering_vectors.output_dir.startswith("data/")
+    assert topic_logistic.source.model_dtype == "float32"
+    assert topic_logistic.source.layer_index == 5
+    assert topic_logistic.sampling.hidden_states_per_class == 100000
+    assert topic_logistic.training.epochs > 1
+    assert topic_logistic.training.l2_strength > 0
+    assert topic_logistic.examples.per_class == 4
+    assert topic_logistic.output_dir.startswith("data/")
     assert steering_benchmark.model.name == "gpt2"
     assert steering_benchmark.model.dtype == "float32"
     assert steering_benchmark.model.layer_index == 5

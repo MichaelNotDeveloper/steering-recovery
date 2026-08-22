@@ -270,9 +270,7 @@ class AllTokenHiddenExtractor:
         self.context_size = int(context_size) if context_size is not None else None
 
     @torch.inference_mode()
-    def __call__(
-        self, token_sequences: Sequence[Sequence[int]]
-    ) -> list[torch.Tensor]:
+    def __call__(self, token_sequences: Sequence[Sequence[int]]) -> list[torch.Tensor]:
         if not token_sequences:
             return []
         lengths = torch.tensor([len(tokens) for tokens in token_sequences])
@@ -364,9 +362,7 @@ def collect_group_moments(
             len(batch_tokens),
             extractor.hidden_size,
         ):
-            raise ValueError(
-                "extractor must return [number_of_prompts, hidden_size]"
-            )
+            raise ValueError("extractor must return [number_of_prompts, hidden_size]")
         for label in dict.fromkeys(batch_labels):
             indices = [
                 index
@@ -428,19 +424,55 @@ def collect_group_token_moments(
 ) -> tuple[dict[Label, HiddenMoments], dict[Label, int]]:
     """Collect every token hidden from exact per-group article quotas in one pass."""
 
+    accumulators = {label: RunningHiddenStatistics() for label in target_articles}
+
+    def update_moments(
+        hidden_chunks: Sequence[torch.Tensor], labels: Sequence[Label]
+    ) -> None:
+        for hidden, label in zip(hidden_chunks, labels):
+            accumulators[label].update(hidden)
+        if batch_observer is not None:
+            batch_observer(hidden_chunks, labels)
+
+    article_counts = collect_group_token_hiddens(
+        examples,
+        token_builder=token_builder,
+        extractor=extractor,
+        target_articles=target_articles,
+        batch_size=batch_size,
+        batch_observer=update_moments,
+        progress=progress,
+    )
+    moments: dict[Label, HiddenMoments] = {}
+    for label, accumulator in accumulators.items():
+        total, variance, count = accumulator.finalize()
+        moments[label] = HiddenMoments(total=total, variance=variance, count=count)
+    return moments, article_counts
+
+
+def collect_group_token_hiddens(
+    examples: Iterable[LabeledText],
+    *,
+    token_builder: FullTextTokenBuilder,
+    extractor: TokenSequenceAllHiddenExtractor,
+    target_articles: Mapping[Label, int],
+    batch_size: int,
+    batch_observer: HiddenBatchObserver,
+    progress: Any | None = None,
+) -> dict[Label, int]:
+    """Pass token hiddens to an observer using exact per-group article quotas."""
+
     if batch_size <= 0:
         raise ValueError("batch_size must be positive")
     if not target_articles or any(count <= 0 for count in target_articles.values()):
         raise ValueError("all target article counts must be positive")
-    accumulators = {label: RunningHiddenStatistics() for label in target_articles}
     article_counts: Counter[Label] = Counter()
     batch_labels: list[Label] = []
     batch_tokens: list[tuple[int, ...]] = []
 
     def complete() -> bool:
         return all(
-            article_counts[label] >= target
-            for label, target in target_articles.items()
+            article_counts[label] >= target for label, target in target_articles.items()
         )
 
     def flush() -> None:
@@ -453,17 +485,17 @@ def collect_group_token_moments(
             if hidden.ndim != 2 or hidden.shape[1] != extractor.hidden_size:
                 raise ValueError("each article hidden matrix must be [tokens, hidden]")
             if len(hidden) == 0:
-                raise ValueError("article hidden matrix must contain at least one token")
-            accumulators[label].update(hidden)
-        if batch_observer is not None:
-            batch_observer(hidden_chunks, tuple(batch_labels))
+                raise ValueError(
+                    "article hidden matrix must contain at least one token"
+                )
+        batch_observer(hidden_chunks, tuple(batch_labels))
         if progress is not None:
             progress.update(len(batch_tokens))
         batch_labels.clear()
         batch_tokens.clear()
 
     for example in examples:
-        if example.label not in accumulators:
+        if example.label not in target_articles:
             continue
         if article_counts[example.label] >= target_articles[example.label]:
             continue
@@ -487,11 +519,7 @@ def collect_group_token_moments(
     }
     if missing:
         raise RuntimeError(f"dataset ended before article quotas were met: {missing}")
-    moments: dict[Label, HiddenMoments] = {}
-    for label, accumulator in accumulators.items():
-        total, variance, count = accumulator.finalize()
-        moments[label] = HiddenMoments(total=total, variance=variance, count=count)
-    return moments, dict(article_counts)
+    return dict(article_counts)
 
 
 def compute_contrasts(

@@ -15,10 +15,18 @@ from steering_recovery.steering.core import (
     PromptTokenBuilder,
     TopicDefinition,
     collect_group_moments,
+    collect_group_token_hiddens,
     collect_group_token_moments,
     compute_contrasts,
 )
-from steering_recovery.steering.logistic import OneVsRestLogisticTrainer
+from steering_recovery.steering.logistic import (
+    BalancedHiddenReservoir,
+    EpochLogisticTrainer,
+    binary_auc_metrics,
+)
+from steering_recovery.steering.logistic_reporting import (
+    write_token_probability_report,
+)
 
 
 class CharacterTokenizer:
@@ -50,9 +58,7 @@ class NumericAllTokenExtractor:
 
     def __call__(self, token_sequences):
         return [
-            torch.tensor(
-                [[token, token * 10] for token in tokens], dtype=torch.float32
-            )
+            torch.tensor([[token, token * 10] for token in tokens], dtype=torch.float32)
             for tokens in token_sequences
         ]
 
@@ -94,9 +100,10 @@ def test_prompt_builder_limits_article_before_adding_template():
     )
     prompt = builder("a" * 100)
     assert prompt[: len(builder.prefix_ids)] == builder.prefix_ids
-    assert prompt[len(builder.prefix_ids) : len(builder.prefix_ids) + 48] == (
-        ord("a"),
-    ) * 48
+    assert (
+        prompt[len(builder.prefix_ids) : len(builder.prefix_ids) + 48]
+        == (ord("a"),) * 48
+    )
     assert prompt[-len(builder.suffix_ids) :] == builder.suffix_ids
     assert builder.metadata()["capture_token"] == "t"
 
@@ -157,9 +164,7 @@ def test_collection_enforces_exact_group_quotas_and_computes_contrast():
         moments,
         [ContrastDefinition("first", "first", (1,), (2,))],
     )
-    torch.testing.assert_close(
-        results[0].steering_vector, torch.tensor([-4.0, -40.0])
-    )
+    torch.testing.assert_close(results[0].steering_vector, torch.tensor([-4.0, -40.0]))
     assert results[0].positive_count == results[0].negative_count == 2
 
 
@@ -187,35 +192,124 @@ def test_all_token_collection_uses_article_quotas_and_token_weighted_means():
     assert len(observed) == 1
 
 
-def test_one_pass_logistic_regressions_save_weights_and_loss_plot(tmp_path):
+def test_observer_only_collection_does_not_require_moment_accumulation():
+    observed = []
+    counts = collect_group_token_hiddens(
+        [LabeledText(1, "1,3"), LabeledText(2, "5,7,9")],
+        token_builder=NumericSequenceBuilder(),
+        extractor=NumericAllTokenExtractor(),
+        target_articles={1: 1, 2: 1},
+        batch_size=2,
+        batch_observer=lambda chunks, labels: observed.append((chunks, labels)),
+    )
+    assert counts == {1: 1, 2: 1}
+    assert len(observed) == 1
+    assert [len(chunk) for chunk in observed[0][0]] == [2, 3]
+
+
+def test_balanced_reservoir_and_epoch_logistic_regressions(tmp_path):
     topics = (
         TopicDefinition(1, "First", "first"),
         TopicDefinition(2, "Second", "second"),
     )
-    trainer = OneVsRestLogisticTrainer(
+    reservoir = BalancedHiddenReservoir(
+        hidden_size=2,
+        topics=topics,
+        samples_per_class=4,
+        seed=7,
+    )
+    reservoir.update(
+        [
+            torch.tensor([[2.0, 0.0], [3.0, 0.0], [4.0, 0.0], [5.0, 0.0]]),
+            torch.tensor([[0.0, 2.0], [0.0, 3.0], [0.0, 4.0], [0.0, 5.0]]),
+        ],
+        [1, 2],
+    )
+    features = reservoir.finalize()
+    assert {label: len(values) for label, values in features.items()} == {1: 4, 2: 4}
+    assert reservoir.metadata()["seen_hidden_states"] == {"first": 4, "second": 4}
+
+    trainer = EpochLogisticTrainer(
         hidden_size=2,
         topics=topics,
         learning_rate=0.01,
         l2_strength=0.001,
+        device=torch.device("cpu"),
+        seed=7,
     )
-    trainer.update(
-        [torch.tensor([[1.0, 0.0], [2.0, 0.0]]), torch.tensor([[0.0, 1.0]])],
-        [1, 2],
+    history = trainer.fit(
+        features,
+        epochs=2,
+        batch_size_per_class=2,
+        evaluation_batch_size=4,
     )
-    artifacts = trainer.save(tmp_path, metadata={"source": {"layer_index": 5}})
+    artifacts = trainer.save(
+        tmp_path,
+        metadata={"source": {"layer_index": 5}},
+        sampling=reservoir.metadata(),
+        training={"epochs": 2, "batch_size_per_class": 2},
+    )
     payload = torch.load(tmp_path / "logistic_regressions.pt", weights_only=True)
     assert payload["weights"].shape == (2, 2)
     torch.testing.assert_close(payload["steering_vectors"], payload["weights"])
     assert payload["bias"].shape == (2,)
-    assert payload["training"]["epochs"] == 1
+    assert payload["training"]["epochs"] == 2
     assert payload["training"]["validation"] is False
-    assert artifacts["steps"] == 1
+    assert len(history) == 2
+    assert 0 <= history[-1]["macro_roc_auc"] <= 1
+    assert 0 <= history[-1]["macro_auc_prc"] <= 1
+    assert artifacts["epochs"] == 2
     assert (tmp_path / "logistic_first.pt").is_file()
     assert (tmp_path / "logistic_second.pt").is_file()
-    assert (tmp_path / "logistic_regression_loss.json").is_file()
-    assert (tmp_path / "logistic_regression_loss.png").is_file()
+    assert (tmp_path / "training_history.json").is_file()
+    assert (tmp_path / "training_curves.png").is_file()
     first = torch.load(tmp_path / "logistic_first.pt", weights_only=True)
     torch.testing.assert_close(first["steering_vector"], first["weight"])
+
+
+def test_auc_metrics_are_one_for_perfect_ranking():
+    roc_auc, auc_prc = binary_auc_metrics(
+        targets=torch.tensor([0, 1, 0, 1]).numpy(),
+        scores=torch.tensor([0.1, 0.8, 0.2, 0.9]).numpy(),
+    )
+    assert roc_auc == 1.0
+    assert auc_prc == 1.0
+
+
+def test_token_probability_report_has_four_modes_and_escapes_text(tmp_path):
+    topics = tuple(
+        TopicDefinition(index, f"Topic {index}", f"topic_{index}")
+        for index in range(1, 5)
+    )
+    examples = [
+        {
+            "id": "topic-01",
+            "true_label": 1,
+            "true_topic": "Topic 1",
+            "truncated": False,
+            "tokens": [
+                {
+                    "index": 0,
+                    "id": 7,
+                    "text": "</script><b>unsafe</b>",
+                    "probabilities": [0.1, 0.2, 0.3, 0.4],
+                }
+            ],
+            "metadata": {"source_text": "<unsafe>"},
+        }
+    ]
+    report = write_token_probability_report(
+        tmp_path / "report.html",
+        topics=topics,
+        examples=examples,
+        metadata={"source": {"model_name": "gpt2", "layer_index": 5}},
+    )
+    html = report.read_text(encoding="utf-8")
+    assert "Подсветка классификатора" in html
+    assert "const DATA" in html
+    assert "</script><b>unsafe</b>" not in html
+    for topic in topics:
+        assert topic.name in html
 
 
 def test_ag_news_defines_four_balanced_one_vs_rest_contrasts():
@@ -251,9 +345,7 @@ def test_artifacts_include_loadable_vectors_and_metadata(tmp_path):
         metadata={"source": {"layer_index": 5}},
     )
     vector_payload = torch.load(tmp_path / "first.pt", weights_only=True)
-    combined_payload = torch.load(
-        tmp_path / "steering_vectors.pt", weights_only=True
-    )
+    combined_payload = torch.load(tmp_path / "steering_vectors.pt", weights_only=True)
     torch.testing.assert_close(
         vector_payload["steering_vector"], torch.tensor([-3.0, -4.0])
     )

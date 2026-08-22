@@ -43,12 +43,6 @@ collection:
   samples_per_topic: 1000
   batch_size: 32
 
-logistic_regression:
-  # Trains four one-vs-rest classifiers on the same token hiddens in one pass.
-  enabled: true
-  learning_rate: 0.001
-  l2_strength: 0.0001
-
 output_dir: data/steering_vectors/ag_news/gpt2_layer_${source.layer_index}
 
 hydra:

@@ -29,8 +29,6 @@ from steering_recovery.steering.core import (
     collect_group_token_moments,
     compute_contrasts,
 )
-from steering_recovery.steering.logistic import OneVsRestLogisticTrainer
-
 
 AG_NEWS_TOPICS = (
     TopicDefinition(label=1, name="World", slug="world"),
@@ -116,9 +114,7 @@ def generate_ag_news_vectors(config: DictConfig) -> dict[str, Any]:
         str(config.source.model_name), str(config.source.model_dtype), device
     )
     model, tokenizer = _load_gpt2(config.source, device, dtype)
-    target_articles = {
-        topic.label: samples_per_topic for topic in AG_NEWS_TOPICS
-    }
+    target_articles = {topic.label: samples_per_topic for topic in AG_NEWS_TOPICS}
     extraction_mode = str(config.extraction.mode)
     progress = tqdm(
         total=samples_per_topic * len(AG_NEWS_TOPICS),
@@ -126,7 +122,6 @@ def generate_ag_news_vectors(config: DictConfig) -> dict[str, Any]:
         unit="article",
         dynamic_ncols=True,
     )
-    logistic_trainer: OneVsRestLogisticTrainer | None = None
     try:
         if extraction_mode == "full_text_all_tokens":
             token_builder = FullTextTokenBuilder(
@@ -139,31 +134,16 @@ def generate_ag_news_vectors(config: DictConfig) -> dict[str, Any]:
                 pad_token_id=int(tokenizer.pad_token_id),
                 device=device,
             )
-            if bool(config.logistic_regression.enabled):
-                logistic_trainer = OneVsRestLogisticTrainer(
-                    hidden_size=extractor.hidden_size,
-                    topics=AG_NEWS_TOPICS,
-                    learning_rate=float(config.logistic_regression.learning_rate),
-                    l2_strength=float(config.logistic_regression.l2_strength),
-                )
             moments, article_counts = collect_group_token_moments(
                 iter_ag_news(config.dataset, seed),
                 token_builder=token_builder,
                 extractor=extractor,
                 target_articles=target_articles,
                 batch_size=batch_size,
-                batch_observer=(
-                    logistic_trainer.update if logistic_trainer is not None else None
-                ),
                 progress=progress,
             )
             extraction_metadata = token_builder.metadata()
         elif extraction_mode == "prompt_last_token":
-            if bool(config.logistic_regression.enabled):
-                raise ValueError(
-                    "logistic regression is supported only for "
-                    "extraction.mode=full_text_all_tokens"
-                )
             prompt_builder = PromptTokenBuilder(
                 tokenizer,
                 prefix=str(config.prompt.prefix),
@@ -219,8 +199,7 @@ def generate_ag_news_vectors(config: DictConfig) -> dict[str, Any]:
             "shuffled": bool(config.dataset.shuffle),
             "seed": seed,
             "topics": [
-                {"label": topic.label, "name": topic.name}
-                for topic in AG_NEWS_TOPICS
+                {"label": topic.label, "name": topic.name} for topic in AG_NEWS_TOPICS
             ],
         },
         "source": {
@@ -253,11 +232,6 @@ def generate_ag_news_vectors(config: DictConfig) -> dict[str, Any]:
         "resolved_config": config_to_dict(config),
     }
     output_dir = ensure_output_dir(config.output_dir)
-    if logistic_trainer is not None:
-        logistic_artifacts = logistic_trainer.save(output_dir, metadata=metadata)
-    else:
-        logistic_artifacts = {"enabled": False}
-    metadata["logistic_regression"] = logistic_artifacts
     manifest = save_steering_artifacts(
         output_dir,
         topics=AG_NEWS_TOPICS,
@@ -271,5 +245,4 @@ def generate_ag_news_vectors(config: DictConfig) -> dict[str, Any]:
         "vectors": [entry["file"] for entry in manifest["vectors"]],
         "hidden_size": extractor.hidden_size,
         "total_hidden_states": total_hidden_states,
-        "logistic_regression": logistic_artifacts,
     }

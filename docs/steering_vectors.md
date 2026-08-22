@@ -42,7 +42,7 @@ v_c = mean(H_c) - mean(H_not_c)
 каждой темы. Моменты считаются потоково в `float64` формулами Chan/Welford.
 
 Предыдущий способ остаётся доступен через
-`extraction.mode=prompt_last_token logistic_regression.enabled=false`. В нём
+`extraction.mode=prompt_last_token`. В нём
 берутся первые 48 GPT-2 token IDs и строится prompt:
 
 ```text
@@ -58,18 +58,6 @@ Forward hook установлен на `h[5]`, то есть на шестой t
 GPT-2 Small загружается в `float32`; dtype записывается в metadata каждого
 артефакта. Векторы из `fp16`/`bf16` hidden states несовместимы с FP32-бенчмарком.
 
-## One-pass logistic regression
-
-Флаг `logistic_regression.enabled=true` обучает четыре независимых one-vs-rest
-логистических регрессии на тех же token hidden states. Для каждой темы target
-равен `1` на токенах статей этой темы и `0` на остальных. Оптимизируется
-`BCEWithLogits + λ/2 · ||w||²`, где `λ` задаётся через `l2_strength`; bias не
-регуляризуется.
-
-Обучение выполняется online одним проходом после каждого GPT-2 batch. Повторного
-извлечения hidden states и validation split нет. Веса, bias, история loss и
-PNG-график сохраняются вместе со steering-артефактами.
-
 ## Запуск
 
 ```bash
@@ -83,12 +71,6 @@ python generate_steering_vectors.py \
   collection.samples_per_topic=8 \
   collection.batch_size=8 \
   output_dir=data/steering_vectors/ag_news/smoke
-```
-
-Отключить обучение классификаторов можно отдельным флагом:
-
-```bash
-python generate_steering_vectors.py logistic_regression.enabled=false
 ```
 
 Параметры модели, слоя, extraction, колонок датасета и квот переопределяются
@@ -106,13 +88,6 @@ python generate_steering_vectors.py dataset.text_column=title
 ```text
 business.pt
 config.yaml
-logistic_business.pt
-logistic_regression_loss.json
-logistic_regression_loss.png
-logistic_regressions.pt
-logistic_sci_tech.pt
-logistic_sports.pt
-logistic_world.pt
 manifest.json
 sci_tech.pt
 sports.pt
@@ -120,10 +95,10 @@ steering_vectors.pt
 world.pt
 ```
 
-Из `data/` в Git включена только каноническая статистика GPT-2 hidden states.
-Steering-векторы нужно получить командой выше; это гарантирует, что они
-построены текущей версией FP32-пайплайна. Векторы, checkpoints и результаты
-запусков остаются локальными артефактами.
+Канонические FP32-векторы, рассчитанные по 10 000 статей каждого класса, включены
+в Git вместе с `manifest.json` и фактически использованным `config.yaml`.
+Повторный запуск не нужен для benchmark; команда выше нужна для пересчёта или
+новой конфигурации.
 
 Каждый тематический `.pt` содержит ключ `steering_vector: Tensor[768]` и поэтому
 непосредственно совместим с `baseline.steering.vector.key=steering_vector`.
@@ -135,13 +110,9 @@ Steering-векторы нужно получить командой выше; �
 же метаданные. `manifest.json` — человекочитаемое описание файлов и L2-норм
 векторов, а `config.yaml` — фактически использованный Hydra-конфиг.
 
-`logistic_regressions.pt` содержит матрицу весов `[4, 768]`, bias `[4]`, порядок
-тем, параметры L2/optimizer и полную историю обучения. Веса продублированы под
-ключом `steering_vectors`, поэтому файл можно напрямую передать benchmark через
-`steering_vectors_path`. Отдельные `logistic_<topic>.pt` содержат совместимый
-ключ `steering_vector`, а
-`logistic_regression_loss.png` показывает общий loss и четыре тематические
-кривые по optimization steps.
+Логистические направления больше не обучаются в этом запуске. Для них есть
+отдельный epoch-based pipeline, описанный в
+[документации классификаторов](topic_logistic_regression.md).
 
 Чтобы использовать, например, World-вектор в существующем baseline GPT-2,
 нужно согласовать модель и слой вмешательства:

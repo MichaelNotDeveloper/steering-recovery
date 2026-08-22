@@ -1,0 +1,63 @@
+seed: 42
+device: auto
+
+dataset:
+  name: sh0416/ag_news
+  config: null
+  split: train
+  text_column: description
+  label_column: label
+  streaming: false
+  shuffle: true
+  shuffle_buffer_size: 10000
+  max_rows: null
+
+source:
+  model_name: gpt2
+  tokenizer_name: gpt2
+  # GPT-2 Small experiments are always full precision.
+  model_dtype: float32
+  trust_remote_code: false
+  layer_path: h
+  layer_index: 5
+
+extraction:
+  # Collect h[5] for every real token of the article body.
+  max_length: 1024
+
+sampling:
+  # First process an equal article quota, then keep a uniform balanced token sample.
+  articles_per_class: 10000
+  hidden_states_per_class: 100000
+  extraction_batch_size: 32
+
+training:
+  epochs: 10
+  # Every optimization batch contains this many hiddens from each of 4 classes.
+  batch_size_per_class: 512
+  evaluation_batch_size: 4096
+  learning_rate: 0.001
+  l2_strength: 0.0001
+
+examples:
+  per_class: 4
+  batch_size: 16
+  seed_offset: 1
+  dataset:
+    name: sh0416/ag_news
+    config: null
+    split: test
+    text_column: description
+    label_column: label
+    streaming: false
+    shuffle: true
+    shuffle_buffer_size: 10000
+    max_rows: null
+
+output_dir: data/topic_logistic_regression/ag_news/gpt2_layer_${source.layer_index}
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: runs/topic-logistic-regression/${now:%Y-%m-%d}/${now:%H-%M-%S}

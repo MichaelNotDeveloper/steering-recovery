@@ -18,6 +18,7 @@ steering-recovery/
 ├── collect_hidden_statistics.py # streaming sum/variance GPT-2 hidden states
 ├── compare_denoisers.py       # CSV/Markdown/barplot по model folders
 ├── generate_steering_vectors.py # Hydra-entrypoint поиска steering-векторов
+├── train_topic_logistic_regressions.py # отдельное обучение AG News classifiers
 ├── run_steering_benchmarks.py # benchmark alpha × vector × method
 ├── train_denoiser.py          # Hydra-entrypoint обучения
 ├── run_baselines.py           # Hydra-entrypoint генерации
@@ -25,6 +26,8 @@ steering-recovery/
 │   ├── cache_activations.yaml
 │   ├── denoiser.yaml
 │   ├── baseline.yaml
+│   ├── steering_vectors.yaml
+│   ├── topic_logistic_regression.yaml
 │   └── experiment/            # готовые параметры multirun
 ├── steering_recovery/
 │   ├── cache.py               # hook и запись .npy shards
@@ -40,7 +43,9 @@ steering-recovery/
 │   ├── steering/              # генерация векторов и бенчмарки steering
 │   │   ├── core.py            # prompt, hook, квоты групп и contrasts
 │   │   ├── ag_news.py         # адаптер и one-vs-rest темы AG News
-│   │   ├── logistic.py        # one-pass L2 logistic regressions и loss plot
+│   │   ├── logistic.py        # balanced reservoir, epoch L2 classifiers, AUC
+│   │   ├── ag_news_logistic.py # orchestration отдельного classifier run
+│   │   ├── logistic_reporting.py # HTML токенных вероятностей
 │   │   ├── artifacts.py       # .pt-векторы и manifest с метаданными
 │   │   ├── pipeline.py        # registry/dispatch генераторов
 │   │   └── benchmarking/      # генерация, scoring, CI и scatter-plots
@@ -62,12 +67,15 @@ flowchart LR
     F["Prompts + steering vector"] --> G["Baseline generation"]
     J -->|"best model checkpoint"| G
     G --> H["JSONL + HTML + W&B"]
-    K["AG News labeled articles"] --> L["GPT-2 h[5] hidden over 'about'"]
+    K["AG News labeled articles"] --> L["GPT-2 h[5] hidden всех токенов"]
     L --> M["Four one-vs-rest mean differences"]
     M --> N["data/steering_vectors + metadata"]
     N --> O["alpha × vector × post-steering method"]
     O --> P["BERT probability + generated-token Dist-3"]
     P --> Q["Bootstrap CI scatter-plots"]
+    L --> R["Balanced hidden reservoir"]
+    R --> S["Epoch L2 logistic regressions"]
+    S --> T["Loss + ROC-AUC + AUC-PRC + token HTML"]
 ```
 
 ## Форматы данных
@@ -169,9 +177,13 @@ map.
 Генераторы и будущие бенчмарки steering изолированы в
 `steering_recovery/steering/`. AG News generator строит четыре направления как
 `mean(topic tokens) - mean(other topic tokens)` по всем hidden полного текста на
-выходе `h[5]` GPT-2. В том же проходе опционально обучаются четыре one-vs-rest
-L2 logistic regression без validation. Детальный формат артефактов и запуск
-описаны в [отдельном документе](steering_vectors.md).
+выходе `h[5]` GPT-2. Этот запуск считает только Difference of Means.
+
+One-vs-rest L2 logistic regression вынесены в отдельный entrypoint. Он собирает
+одинаковое число token hidden states каждого класса в reservoir, обучается по
+эпохам сбалансированными batches и считает train ROC-AUC/AUC-PRC без validation.
+Формат и запуск описаны в
+[документации классификаторов](topic_logistic_regression.md).
 
 Benchmark runner использует сохранённые направления, один общий набор из 100
 AG News prompts и строит отдельный график для каждой пары vector/method. Метрики,

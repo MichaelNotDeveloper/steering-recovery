@@ -113,12 +113,21 @@ python generate_steering_vectors.py
 ```
 
 Команда обрабатывает по 1000 статей каждой темы и сохраняет отдельные векторы и
-полные метаданные в `data/steering_vectors/ag_news/gpt2_layer_5/`. По умолчанию
-Difference of Means использует hidden всех токенов полного текста. В том же
-GPT-2 проходе опционально обучаются четыре one-vs-rest L2 logistic regression и
-сохраняется график training loss. Формат, старый prompt-режим и расширение
-пайплайна описаны в
+полные метаданные в `data/steering_vectors/ag_news/gpt2_layer_5/`. Difference of
+Means использует hidden всех токенов полного текста. Формат, старый prompt-режим
+и расширение пайплайна описаны в
 [документации по steering-векторам](docs/steering_vectors.md).
+
+Отдельное обучение четырёх one-vs-rest L2 logistic regression по большой
+сбалансированной выборке hidden-состояний:
+
+```bash
+python train_topic_logistic_regressions.py
+```
+
+Запуск сохраняет loss, ROC-AUC, AUC-PRC по эпохам и интерактивный HTML с четырьмя
+режимами токенной подсветки. Подробности: [классификаторы тем
+AG News](docs/topic_logistic_regression.md).
 
 Бенчмарк силы steering и post-steering denoiser:
 
@@ -134,6 +143,7 @@ probability против Dist-3 с интерактивной HTML-галере�
 Все параметры можно переопределять из CLI. Подробности: [архитектура](docs/architecture.md),
 [обучение denoiser](docs/denoiser_training.md) и
 [генерация steering-векторов](docs/steering_vectors.md),
+[классификаторы тем](docs/topic_logistic_regression.md),
 [бенчмарки steering](docs/steering_benchmarks.md).
 
 ## Проверки

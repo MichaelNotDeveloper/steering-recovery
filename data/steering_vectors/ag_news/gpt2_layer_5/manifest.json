@@ -1,0 +1,180 @@
+{
+  "format_version": 1,
+  "method": "difference_of_means",
+  "formula": "mean(positive) - mean(negative)",
+  "hidden_size": 768,
+  "combined_file": "steering_vectors.pt",
+  "vectors": [
+    {
+      "name": "World",
+      "slug": "world",
+      "file": "world.pt",
+      "positive_labels": [
+        1
+      ],
+      "negative_labels": [
+        2,
+        3,
+        4
+      ],
+      "positive_count": 403962,
+      "negative_count": 1275659,
+      "l2_norm": 8.468579292297363
+    },
+    {
+      "name": "Sports",
+      "slug": "sports",
+      "file": "sports.pt",
+      "positive_labels": [
+        2
+      ],
+      "negative_labels": [
+        1,
+        3,
+        4
+      ],
+      "positive_count": 412908,
+      "negative_count": 1266713,
+      "l2_norm": 8.376800537109375
+    },
+    {
+      "name": "Business",
+      "slug": "business",
+      "file": "business.pt",
+      "positive_labels": [
+        3
+      ],
+      "negative_labels": [
+        1,
+        2,
+        4
+      ],
+      "positive_count": 444028,
+      "negative_count": 1235593,
+      "l2_norm": 8.653812408447266
+    },
+    {
+      "name": "Sci/Tech",
+      "slug": "sci_tech",
+      "file": "sci_tech.pt",
+      "positive_labels": [
+        4
+      ],
+      "negative_labels": [
+        1,
+        2,
+        3
+      ],
+      "positive_count": 418723,
+      "negative_count": 1260898,
+      "l2_norm": 6.129810810089111
+    }
+  ],
+  "metadata": {
+    "generator": "ag_news_one_vs_rest",
+    "dataset": {
+      "name": "sh0416/ag_news",
+      "config": null,
+      "split": "train",
+      "text_column": "description",
+      "label_column": "label",
+      "shuffled": true,
+      "seed": 42,
+      "topics": [
+        {
+          "label": 1,
+          "name": "World"
+        },
+        {
+          "label": 2,
+          "name": "Sports"
+        },
+        {
+          "label": 3,
+          "name": "Business"
+        },
+        {
+          "label": 4,
+          "name": "Sci/Tech"
+        }
+      ]
+    },
+    "source": {
+      "model_name": "gpt2",
+      "tokenizer_name": "gpt2",
+      "layer_path": "h",
+      "layer_index": 5,
+      "layer_number_one_based": 6,
+      "hidden_size": 768,
+      "model_dtype": "float32"
+    },
+    "extraction": {
+      "mode": "full_text_all_tokens",
+      "template": "{article}",
+      "max_length": 1024,
+      "truncation": "right_at_model_context_limit",
+      "capture_position": "all_non_padding_tokens",
+      "pooling": "token_weighted_mean"
+    },
+    "collection": {
+      "samples_per_topic": 10000,
+      "batch_size": 32,
+      "article_counts": {
+        "world": 10000,
+        "sports": 10000,
+        "business": 10000,
+        "sci_tech": 10000
+      },
+      "hidden_state_counts": {
+        "world": 403962,
+        "sports": 412908,
+        "business": 444028,
+        "sci_tech": 418723
+      },
+      "total_hidden_states": 1679621
+    },
+    "method": {
+      "name": "difference_of_means",
+      "formula": "mean(positive_topic) - mean(all_other_topics)"
+    },
+    "resolved_config": {
+      "generator": "ag_news",
+      "seed": 42,
+      "device": "auto",
+      "dataset": {
+        "name": "sh0416/ag_news",
+        "config": null,
+        "split": "train",
+        "text_column": "description",
+        "label_column": "label",
+        "streaming": false,
+        "shuffle": true,
+        "shuffle_buffer_size": 10000,
+        "max_rows": null
+      },
+      "source": {
+        "model_name": "gpt2",
+        "tokenizer_name": "gpt2",
+        "model_dtype": "float32",
+        "trust_remote_code": false,
+        "layer_path": "h",
+        "layer_index": 5
+      },
+      "extraction": {
+        "mode": "full_text_all_tokens",
+        "max_length": 1024
+      },
+      "prompt": {
+        "prefix": "Article: ",
+        "suffix": "\nThis article is mainly about",
+        "article_tokens": 48,
+        "expected_last_token": "about"
+      },
+      "collection": {
+        "samples_per_topic": 10000,
+        "batch_size": 32
+      },
+      "output_dir": "data/steering_vectors/ag_news/gpt2_layer_5"
+    }
+  }
+}

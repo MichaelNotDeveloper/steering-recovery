@@ -46,7 +46,13 @@ def summarize_condition(
         "condition_id",
         "method",
         "intervention_mode",
+        "denoiser_name",
         "denoiser_checkpoint",
+        "denoiser_sigma",
+        "denoiser_dropout",
+        "recovery_name",
+        "denoising_mode",
+        "beta",
         "vector_name",
         "vector_slug",
         "target_dataset_label",
@@ -54,7 +60,7 @@ def summarize_condition(
         "alpha",
     )
     for field in stable_fields:
-        if any(row[field] != first[field] for row in rows):
+        if any(row.get(field) != first.get(field) for row in rows):
             raise ValueError(f"condition rows disagree on {field}")
     probability = bootstrap_mean_interval(
         [float(row["target_probability"]) for row in rows],
@@ -65,7 +71,7 @@ def summarize_condition(
     if not metric_fields or len(set(metric_fields)) != len(metric_fields):
         raise ValueError("metric_fields must contain unique values")
     result = {
-        **{field: first[field] for field in stable_fields},
+        **{field: first.get(field) for field in stable_fields},
         "samples": len(rows),
         "confidence": confidence,
         "target_probability_mean": probability[0],

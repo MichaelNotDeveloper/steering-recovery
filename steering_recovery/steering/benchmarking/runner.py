@@ -67,8 +67,14 @@ class SteeringVectorSpec:
 class SteeringMethod:
     name: str
     intervention_mode: str
+    denoiser_name: str | None
     denoiser_checkpoint: str | None
     denoiser_sha256: str | None
+    denoiser_sigma: float | None
+    denoiser_dropout: float | None
+    recovery_name: str | None
+    denoising_mode: str | None
+    beta: int
 
 
 @dataclass(frozen=True)
@@ -161,36 +167,201 @@ def load_steering_vectors(
     return specs, payload
 
 
-def parse_methods(config: Sequence[Any]) -> list[SteeringMethod]:
+def _config_get(config: Any, key: str, default: Any = None) -> Any:
+    getter = getattr(config, "get", None)
+    if getter is not None:
+        return getter(key, default)
+    return getattr(config, key, default)
+
+
+def _validate_intervention_mode(value: Any) -> str:
+    mode = str(value)
+    if mode not in {
+        "none",
+        "once_at_start",
+        "every_step",
+        "entropy_threshold",
+    }:
+        raise ValueError(f"unknown intervention mode {mode!r}")
+    return mode
+
+
+def _validate_beta(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError("beta must be a positive integer")
+    beta = int(value)
+    if beta <= 0 or float(value) != beta:
+        raise ValueError("beta must be a positive integer")
+    return beta
+
+
+def _optional_float(value: Any, *, field: str) -> float | None:
+    if value is None:
+        return None
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError(f"{field} must be finite")
+    return result
+
+
+def parse_methods(
+    config: Sequence[Any], recovery_config: Any | None = None
+) -> list[SteeringMethod]:
     methods: list[SteeringMethod] = []
+    checkpoint_hashes: dict[str, str] = {}
+
+    def checkpoint_metadata(path_value: Any) -> tuple[str | None, str | None]:
+        if path_value is None:
+            return None, None
+        checkpoint = str(path_value)
+        path = Path(checkpoint)
+        if not path.is_file():
+            raise FileNotFoundError(checkpoint)
+        if checkpoint not in checkpoint_hashes:
+            checkpoint_hashes[checkpoint] = _file_sha256(path)
+        return checkpoint, checkpoint_hashes[checkpoint]
+
     for item in config:
         name = str(item.name)
         if not _SAFE_NAME.fullmatch(name):
             raise ValueError(f"method name must be filesystem-safe: {name!r}")
-        checkpoint = None if item.denoiser_checkpoint is None else str(item.denoiser_checkpoint)
-        if checkpoint is not None and not Path(checkpoint).is_file():
-            raise FileNotFoundError(checkpoint)
-        intervention_mode = str(item.intervention_mode)
-        if intervention_mode not in {
-            "none",
-            "once_at_start",
-            "every_step",
-            "entropy_threshold",
-        }:
-            raise ValueError(f"unknown intervention mode {intervention_mode!r}")
+        checkpoint, checkpoint_sha256 = checkpoint_metadata(
+            _config_get(item, "denoiser_checkpoint")
+        )
+        intervention_mode = _validate_intervention_mode(item.intervention_mode)
+        denoising_mode_value = _config_get(item, "denoising_mode")
+        denoising_mode = (
+            None
+            if checkpoint is None
+            else str(denoising_mode_value or "full")
+        )
+        if denoising_mode not in {None, "full", "orthogonal"}:
+            raise ValueError(f"unknown denoising mode {denoising_mode!r}")
+        beta = _validate_beta(_config_get(item, "beta", 1))
+        if checkpoint is None and (denoising_mode_value is not None or beta != 1):
+            raise ValueError("denoising configuration requires a checkpoint")
         methods.append(
             SteeringMethod(
                 name=name,
                 intervention_mode=intervention_mode,
-                denoiser_checkpoint=checkpoint,
-                denoiser_sha256=(
-                    _file_sha256(Path(checkpoint)) if checkpoint is not None else None
+                denoiser_name=(
+                    None
+                    if checkpoint is None
+                    else str(
+                        _config_get(
+                            item,
+                            "denoiser_name",
+                            Path(checkpoint).parent.name,
+                        )
+                    )
                 ),
+                denoiser_checkpoint=checkpoint,
+                denoiser_sha256=checkpoint_sha256,
+                denoiser_sigma=_optional_float(
+                    _config_get(item, "denoiser_sigma"), field="denoiser_sigma"
+                ),
+                denoiser_dropout=_optional_float(
+                    _config_get(item, "denoiser_dropout"),
+                    field="denoiser_dropout",
+                ),
+                recovery_name=(
+                    None
+                    if checkpoint is None
+                    else str(_config_get(item, "recovery_name", denoising_mode))
+                ),
+                denoising_mode=denoising_mode,
+                beta=beta,
             )
         )
+
+    if recovery_config is not None:
+        denoisers = list(_config_get(recovery_config, "denoisers", []))
+        algorithms = list(_config_get(recovery_config, "algorithms", []))
+        if not denoisers or not algorithms:
+            raise ValueError(
+                "recovery.denoisers and recovery.algorithms must be non-empty"
+            )
+        for denoiser_spec in denoisers:
+            denoiser_name = str(denoiser_spec.name)
+            if not _SAFE_NAME.fullmatch(denoiser_name):
+                raise ValueError(
+                    f"denoiser name must be filesystem-safe: {denoiser_name!r}"
+                )
+            checkpoint, checkpoint_sha256 = checkpoint_metadata(
+                denoiser_spec.checkpoint
+            )
+            assert checkpoint is not None and checkpoint_sha256 is not None
+            sigma = _optional_float(
+                _config_get(denoiser_spec, "sigma"), field="denoiser sigma"
+            )
+            dropout = _optional_float(
+                _config_get(denoiser_spec, "dropout"), field="denoiser dropout"
+            )
+            for algorithm in algorithms:
+                algorithm_name = str(algorithm.name)
+                if not _SAFE_NAME.fullmatch(algorithm_name):
+                    raise ValueError(
+                        "recovery algorithm name must be filesystem-safe: "
+                        f"{algorithm_name!r}"
+                    )
+                denoising_mode = str(algorithm.denoising_mode)
+                if denoising_mode not in {"full", "orthogonal"}:
+                    raise ValueError(
+                        f"unknown denoising mode {denoising_mode!r}"
+                    )
+                methods.append(
+                    SteeringMethod(
+                        name=f"{denoiser_name}__{algorithm_name}",
+                        intervention_mode=_validate_intervention_mode(
+                            _config_get(
+                                algorithm, "intervention_mode", "every_step"
+                            )
+                        ),
+                        denoiser_name=denoiser_name,
+                        denoiser_checkpoint=checkpoint,
+                        denoiser_sha256=checkpoint_sha256,
+                        denoiser_sigma=sigma,
+                        denoiser_dropout=dropout,
+                        recovery_name=algorithm_name,
+                        denoising_mode=denoising_mode,
+                        beta=_validate_beta(_config_get(algorithm, "beta", 1)),
+                    )
+                )
     if not methods or len({method.name for method in methods}) != len(methods):
         raise ValueError("benchmark methods must have unique names")
     return methods
+
+
+def _validate_denoiser_method(
+    method: SteeringMethod,
+    denoiser: Any,
+    metadata: Mapping[str, Any],
+) -> None:
+    model_config = denoiser.model.config
+    if method.denoiser_dropout is not None and not math.isclose(
+        float(model_config.dropout), method.denoiser_dropout
+    ):
+        raise ValueError(
+            f"{method.denoiser_name} checkpoint dropout={model_config.dropout} "
+            f"differs from configured {method.denoiser_dropout}"
+        )
+    checkpoint_config = metadata.get("config")
+    variant = (
+        checkpoint_config.get("variant")
+        if isinstance(checkpoint_config, Mapping)
+        else None
+    )
+    checkpoint_sigma = (
+        variant.get("sigma") if isinstance(variant, Mapping) else None
+    )
+    if method.denoiser_sigma is not None and (
+        checkpoint_sigma is None
+        or not math.isclose(float(checkpoint_sigma), method.denoiser_sigma)
+    ):
+        raise ValueError(
+            f"{method.denoiser_name} checkpoint sigma={checkpoint_sigma!r} "
+            f"differs from configured {method.denoiser_sigma}"
+        )
 
 
 def _atomic_write_jsonl(rows: Sequence[dict[str, Any]], path: Path) -> None:
@@ -273,11 +444,24 @@ def _write_examples_markdown(rows: Sequence[dict[str, Any]], path: Path) -> None
         ]
         if "slor" in row:
             metric_parts.append(f"SLOR: `{float(row['slor']):.4f}`")
+        if row.get("denoiser_name") is None:
+            recovery_parts = ["Recovery: `raw`"]
+        else:
+            recovery_parts = [
+                f"Denoiser: `{row['denoiser_name']}`",
+                f"recovery: `{row.get('recovery_name')}`",
+                f"mode: `{row.get('denoising_mode')}`",
+                f"beta: `{row.get('beta', 1)}`",
+                f"sigma: `{row.get('denoiser_sigma')}`",
+                f"dropout: `{row.get('denoiser_dropout')}`",
+            ]
         parts.extend(
             [
                 f"## {row['vector_name']} · {row['method']} · α={row['alpha']}",
                 "",
                 f"Source topic: `{row['source_topic']}` · sample: `{row['sample_id']}`",
+                "",
+                " · ".join(recovery_parts),
                 "",
                 " · ".join(
                     [
@@ -393,7 +577,7 @@ def run_steering_benchmark(
     validate_gpt2_small_vector_precision(
         vector_payload, source_model_name=str(config.model.name)
     )
-    methods = parse_methods(config.methods)
+    methods = parse_methods(config.methods, _config_get(config, "recovery"))
     alphas = [float(value) for value in config.alphas]
     if not alphas or any(not math.isfinite(alpha) for alpha in alphas):
         raise ValueError("alphas must be a non-empty list of finite values")
@@ -477,98 +661,127 @@ def run_steering_benchmark(
         dynamic_ncols=True,
     )
     condition_files: list[Path] = []
+    methods_by_checkpoint: dict[str | None, list[SteeringMethod]] = {}
+    for method in methods:
+        methods_by_checkpoint.setdefault(method.denoiser_checkpoint, []).append(method)
     try:
-        for method in methods:
+        for checkpoint, checkpoint_methods in methods_by_checkpoint.items():
             denoiser = None
-            if method.denoiser_checkpoint is not None:
+            denoiser_metadata: dict[str, Any] = {}
+            if checkpoint is not None:
                 denoiser, denoiser_metadata = load_checkpoint(
-                    method.denoiser_checkpoint,
+                    checkpoint,
                     device=device,
                     dtype=generation_dtype,
                 )
                 validate_gpt2_small_denoiser_precision(
                     denoiser_metadata, source_model_name=str(config.model.name)
                 )
-            for condition in [item for item in conditions if item.method == method]:
-                path = _condition_path(output_dir, condition)
-                condition_files.append(path)
-                condition_signature = _signature(
-                    {
-                        **base_signature,
-                        "method": method.__dict__,
-                        "vector": condition.vector.slug,
-                        "alpha": condition.alpha,
-                    }
-                )
-                existing = _load_jsonl(path) if bool(config.resume) else []
-                if len(existing) == len(prompts) and all(
-                    row.get("signature") == condition_signature for row in existing
-                ):
-                    progress.update(len(existing))
-                    continue
-                rows: list[dict[str, Any]] = []
-                partial = path.with_suffix(".partial.jsonl")
-                partial_rows = _load_jsonl(partial) if bool(config.resume) else []
-                if len(partial_rows) > len(prompts) or not all(
-                    row.get("signature") == condition_signature
-                    and int(row.get("sample_index", -1)) == index
-                    for index, row in enumerate(partial_rows)
-                ):
-                    partial_rows = []
-                rows.extend(partial_rows)
-                progress.update(len(partial_rows))
-                path.parent.mkdir(parents=True, exist_ok=True)
-                mode = "a" if partial_rows else "w"
-                with partial.open(mode, encoding="utf-8") as stream:
-                    for sample_index in range(len(rows), len(prompts)):
-                        prompt = prompts[sample_index]
-                        generation_seed = seed + sample_index
-                        continuation = generate_steered_continuation(
-                            model,
-                            tokenizer,
-                            prompt.prompt_token_ids,
-                            condition.vector.vector,
-                            alpha=condition.alpha,
-                            layer_index=int(config.model.layer_index),
-                            layer_path=config.model.layer_path,
-                            intervention_mode=method.intervention_mode,
-                            entropy_threshold=float(config.model.entropy_threshold),
-                            denoiser=denoiser,
-                            max_new_tokens=new_tokens,
-                            temperature=float(config.generation.temperature),
-                            top_p=float(config.generation.top_p),
-                            seed=generation_seed,
-                            stop_on_eos=bool(config.generation.stop_on_eos),
-                        )
-                        row = {
-                            "signature": condition_signature,
-                            "condition_id": condition.condition_id,
-                            "method": method.name,
-                            "intervention_mode": method.intervention_mode,
-                            "denoiser_checkpoint": method.denoiser_checkpoint,
-                            "vector_name": condition.vector.name,
-                            "vector_slug": condition.vector.slug,
-                            "target_dataset_label": condition.vector.dataset_label,
-                            "target_classifier_index": condition.vector.classifier_index,
+                for method in checkpoint_methods:
+                    _validate_denoiser_method(method, denoiser, denoiser_metadata)
+            for method in checkpoint_methods:
+                for condition in [item for item in conditions if item.method == method]:
+                    path = _condition_path(output_dir, condition)
+                    condition_files.append(path)
+                    condition_signature = _signature(
+                        {
+                            **base_signature,
+                            "method": method.__dict__,
+                            "vector": condition.vector.slug,
                             "alpha": condition.alpha,
-                            "sample_index": sample_index,
-                            "sample_id": prompt.sample_id,
-                            "source_label": prompt.source_label,
-                            "source_topic": prompt.source_topic,
-                            "seed": generation_seed,
-                            "prompt_text": continuation.prompt_text,
-                            "prompt_token_ids": prompt.prompt_token_ids,
-                            "generated_text": continuation.generated_text,
-                            "generated_token_ids": continuation.generated_token_ids,
-                            "full_text": continuation.full_text,
-                            "intervention_steps": continuation.intervention_steps,
-                            "forward_calls": continuation.forward_calls,
                         }
-                        stream.write(json.dumps(row, ensure_ascii=False) + "\n")
-                        stream.flush()
-                        rows.append(row)
-                        progress.update(1)
-                os.replace(partial, path)
+                    )
+                    existing = _load_jsonl(path) if bool(config.resume) else []
+                    if len(existing) == len(prompts) and all(
+                        row.get("signature") == condition_signature
+                        for row in existing
+                    ):
+                        progress.update(len(existing))
+                        continue
+                    rows: list[dict[str, Any]] = []
+                    partial = path.with_suffix(".partial.jsonl")
+                    partial_rows = _load_jsonl(partial) if bool(config.resume) else []
+                    if len(partial_rows) > len(prompts) or not all(
+                        row.get("signature") == condition_signature
+                        and int(row.get("sample_index", -1)) == index
+                        for index, row in enumerate(partial_rows)
+                    ):
+                        partial_rows = []
+                    rows.extend(partial_rows)
+                    progress.update(len(partial_rows))
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    mode = "a" if partial_rows else "w"
+                    with partial.open(mode, encoding="utf-8") as stream:
+                        for sample_index in range(len(rows), len(prompts)):
+                            prompt = prompts[sample_index]
+                            generation_seed = seed + sample_index
+                            continuation = generate_steered_continuation(
+                                model,
+                                tokenizer,
+                                prompt.prompt_token_ids,
+                                condition.vector.vector,
+                                alpha=condition.alpha,
+                                layer_index=int(config.model.layer_index),
+                                layer_path=config.model.layer_path,
+                                intervention_mode=method.intervention_mode,
+                                entropy_threshold=float(
+                                    config.model.entropy_threshold
+                                ),
+                                denoiser=denoiser,
+                                denoising_mode=method.denoising_mode or "full",
+                                beta=method.beta,
+                                max_new_tokens=new_tokens,
+                                temperature=float(config.generation.temperature),
+                                top_p=float(config.generation.top_p),
+                                seed=generation_seed,
+                                stop_on_eos=bool(config.generation.stop_on_eos),
+                            )
+                            row = {
+                                "signature": condition_signature,
+                                "condition_id": condition.condition_id,
+                                "method": method.name,
+                                "intervention_mode": method.intervention_mode,
+                                "denoiser_name": method.denoiser_name,
+                                "denoiser_checkpoint": method.denoiser_checkpoint,
+                                "denoiser_sigma": method.denoiser_sigma,
+                                "denoiser_dropout": method.denoiser_dropout,
+                                "recovery_name": method.recovery_name,
+                                "denoising_mode": method.denoising_mode,
+                                "beta": method.beta,
+                                "vector_name": condition.vector.name,
+                                "vector_slug": condition.vector.slug,
+                                "target_dataset_label": (
+                                    condition.vector.dataset_label
+                                ),
+                                "target_classifier_index": (
+                                    condition.vector.classifier_index
+                                ),
+                                "alpha": condition.alpha,
+                                "sample_index": sample_index,
+                                "sample_id": prompt.sample_id,
+                                "source_label": prompt.source_label,
+                                "source_topic": prompt.source_topic,
+                                "seed": generation_seed,
+                                "prompt_text": continuation.prompt_text,
+                                "prompt_token_ids": prompt.prompt_token_ids,
+                                "generated_text": continuation.generated_text,
+                                "generated_token_ids": (
+                                    continuation.generated_token_ids
+                                ),
+                                "full_text": continuation.full_text,
+                                "intervention_steps": (
+                                    continuation.intervention_steps
+                                ),
+                                "denoiser_calls": continuation.denoiser_calls,
+                                "forward_calls": continuation.forward_calls,
+                            }
+                            stream.write(
+                                json.dumps(row, ensure_ascii=False) + "\n"
+                            )
+                            stream.flush()
+                            rows.append(row)
+                            progress.update(1)
+                    os.replace(partial, path)
             _release_model(denoiser)
             denoiser = None
     finally:
@@ -758,14 +971,20 @@ def run_steering_benchmark(
         dpi=int(config.plot.dpi),
     )
     result = {
-        "format_version": 2,
+        "format_version": 3,
         "output_dir": str(output_dir),
         "conditions": len(conditions),
         "generations_per_condition": len(prompts),
         "total_generations": len(conditions) * len(prompts),
         "vectors": [spec.slug for spec in vectors],
         "methods": [method.name for method in methods],
+        "method_specs": [method.__dict__ for method in methods],
         "alphas": alphas,
+        "recovery": {
+            "denoiser_identity": "D(x) = x + sigma^2 * grad(log p_sigma(x))",
+            "orthogonalization_space": "feature-normalized denoiser coordinates",
+            "iterative_step": "alpha / beta",
+        },
         "classifier": {
             "model_name": str(config.classifier.model_name),
             "class_indices": class_indices,

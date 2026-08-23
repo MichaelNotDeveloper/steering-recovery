@@ -44,6 +44,12 @@ def write_examples_html(
     <h1>Steering benchmark generations</h1>
     <div class="controls">
       <label class="control">Method<select id="method"></select></label>
+      <label class="control">Denoiser<select id="denoiser_name"></select></label>
+      <label class="control">Algorithm<select id="recovery_name"></select></label>
+      <label class="control">Recovery<select id="denoising_mode"></select></label>
+      <label class="control">Beta<select id="beta"></select></label>
+      <label class="control">Sigma<select id="denoiser_sigma"></select></label>
+      <label class="control">Dropout<select id="denoiser_dropout"></select></label>
       <label class="control">Vector<select id="vector_slug"></select></label>
       <label class="control">Alpha<select id="alpha"></select></label>
       <label class="control">Source topic<select id="source_topic"></select></label>
@@ -56,22 +62,29 @@ def write_examples_html(
     const rows=JSON.parse(document.getElementById('examples-data').textContent);
     const filters=[
       {id:'method',label:'All methods',sort:false},
+      {id:'denoiser_name',label:'All denoisers',sort:false},
+      {id:'recovery_name',label:'All algorithms',sort:false},
+      {id:'denoising_mode',label:'All recovery modes',sort:false},
+      {id:'beta',label:'All beta values',sort:true},
+      {id:'denoiser_sigma',label:'All sigma values',sort:true},
+      {id:'denoiser_dropout',label:'All dropout values',sort:true},
       {id:'vector_slug',label:'All vectors',sort:false},
       {id:'alpha',label:'All alpha values',sort:true},
       {id:'source_topic',label:'All source topics',sort:false}
     ];
+    function filterValue(row,id){const value=row[id];return value===null||value===undefined?'none':String(value)}
     const selections={};
     for(const filter of filters){
       const select=document.getElementById(filter.id);selections[filter.id]=select;
       select.append(new Option(filter.label,''));
-      let values=[...new Set(rows.map(row=>String(row[filter.id])))];
-      values.sort(filter.sort?(a,b)=>Number(a)-Number(b):(a,b)=>a.localeCompare(b));
+      let values=[...new Set(rows.map(row=>filterValue(row,filter.id)))];
+      values.sort(filter.sort?(a,b)=>a==='none'?-1:b==='none'?1:Number(a)-Number(b):(a,b)=>a.localeCompare(b));
       for(const value of values)select.append(new Option(value,value));
       select.addEventListener('change',render);
     }
     function badge(text){const item=document.createElement('span');item.className='badge';item.textContent=text;return item}
     function render(){
-      const visible=rows.filter(row=>filters.every(filter=>!selections[filter.id].value||String(row[filter.id])===selections[filter.id].value));
+      const visible=rows.filter(row=>filters.every(filter=>!selections[filter.id].value||filterValue(row,filter.id)===selections[filter.id].value));
       document.getElementById('count').textContent=`${visible.length} / ${rows.length} generations`;
       const gallery=document.getElementById('gallery');gallery.replaceChildren();
       if(!visible.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='No generations match these filters.';gallery.append(empty);return}
@@ -81,6 +94,12 @@ def write_examples_html(
         const title=document.createElement('h2');title.textContent=`${row.vector_name} · ${row.method} · α=${row.alpha}`;heading.append(title);article.append(heading);
         const badges=document.createElement('div');badges.className='badges';
         badges.append(badge(`source: ${row.source_topic}`),badge(`target p: ${Number(row.target_probability).toFixed(4)}`));
+        if(row.denoiser_name!==null&&row.denoiser_name!==undefined){
+          badges.append(badge(`denoiser: ${row.denoiser_name}`),badge(`algorithm: ${row.recovery_name}`),badge(`recovery: ${row.denoising_mode}`),badge(`β: ${row.beta}`));
+          if(row.denoiser_sigma!==null&&row.denoiser_sigma!==undefined)badges.append(badge(`σ: ${row.denoiser_sigma}`));
+          if(row.denoiser_dropout!==null&&row.denoiser_dropout!==undefined)badges.append(badge(`dropout: ${row.denoiser_dropout}`));
+          if(row.denoiser_calls!==undefined)badges.append(badge(`denoiser calls: ${row.denoiser_calls}`));
+        }
         for(const order of [1,2,3])if(row[`distinct_${order}`]!==undefined)badges.append(badge(`Dist-${order}: ${Number(row[`distinct_${order}`]).toFixed(4)}`));
         if(row.slor!==undefined)badges.append(badge(`SLOR: ${Number(row.slor).toFixed(4)}`));
         badges.append(badge(`seed: ${row.seed}`));article.append(badges);

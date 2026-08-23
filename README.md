@@ -139,7 +139,9 @@ python run_steering_benchmarks.py
 target-class probability против Dist-1, Dist-2, Dist-3 и SLOR на `gpt2-large`,
 а также интерактивная HTML-галерея примеров. Цвет кодирует `alpha`, вокруг точек
 показывается 95% bootstrap CI. Подробности и формат результатов:
-[документация по бенчмаркам](docs/steering_benchmarks.md).
+[документация по бенчмаркам](docs/steering_benchmarks.md). Формулы обычного,
+ортогонального и двух итеративных вариантов вынесены в описание
+[четырёх методов восстановления](docs/steering_recovery_methods.md).
 
 Все параметры можно переопределять из CLI. Подробности: [архитектура](docs/architecture.md),
 [обучение denoiser](docs/denoiser_training.md) и

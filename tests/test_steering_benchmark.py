@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 from torch import nn
+from omegaconf import OmegaConf
 
 from steering_recovery.steering.benchmarking.data import (
     select_examples,
@@ -15,6 +16,7 @@ from steering_recovery.steering.benchmarking.plotting import plot_benchmark_seri
 from steering_recovery.steering.benchmarking.reporting import write_examples_html
 from steering_recovery.steering.benchmarking.runner import (
     load_steering_vectors,
+    parse_methods,
     validate_gpt2_small_vector_precision,
 )
 from steering_recovery.steering.benchmarking.scoring import (
@@ -59,10 +61,13 @@ class TrackingDenoiser:
     def __init__(self):
         self.model = nn.Linear(3, 3)
         self.calls = 0
+        self.deltas = []
 
-    def denoise_steered(self, activations, raw_delta):
+    def denoise_steered(self, activations, raw_delta, *, mode):
         assert activations.shape == raw_delta.shape
+        assert mode == "full"
         self.calls += 1
+        self.deltas.append(raw_delta.detach().clone())
         return activations
 
 
@@ -139,8 +144,93 @@ def test_benchmark_generation_keeps_exact_new_token_count():
     )
     assert len(continuation.generated_token_ids) == 4
     assert continuation.intervention_steps == 4
+    assert continuation.denoiser_calls == 4
     assert continuation.forward_calls == 4
     assert denoiser.calls == 4
+
+
+def test_iterative_recovery_splits_alpha_into_beta_substeps():
+    model = TinyCausalLM()
+    denoiser = TrackingDenoiser()
+    continuation = generate_steered_continuation(
+        model,
+        IntegerTokenizer(),
+        [1, 2, 3],
+        torch.ones(3),
+        alpha=2.0,
+        layer_index=0,
+        layer_path="transformer.h",
+        intervention_mode="every_step",
+        entropy_threshold=0.35,
+        denoiser=denoiser,
+        denoising_mode="full",
+        beta=3,
+        max_new_tokens=2,
+        temperature=0,
+        top_p=1,
+        seed=3,
+        stop_on_eos=False,
+    )
+    assert continuation.intervention_steps == 2
+    assert continuation.denoiser_calls == 6
+    assert denoiser.calls == 6
+    assert all(
+        torch.allclose(delta, torch.full_like(delta, 2 / 3))
+        for delta in denoiser.deltas
+    )
+
+
+def test_recovery_grid_expands_four_algorithms_per_checkpoint(tmp_path):
+    checkpoint = tmp_path / "best.pt"
+    checkpoint.write_bytes(b"checkpoint")
+
+    methods = parse_methods(
+        OmegaConf.create(
+            [
+                {
+                    "name": "raw",
+                    "intervention_mode": "every_step",
+                    "denoiser_checkpoint": None,
+                }
+            ]
+        ),
+        OmegaConf.create(
+            {
+                "denoisers": [
+                    {
+                        "name": "sigma_0p1",
+                        "checkpoint": str(checkpoint),
+                        "sigma": 0.1,
+                        "dropout": 0.0,
+                    }
+                ],
+                "algorithms": [
+                    {"name": "denoise", "denoising_mode": "full", "beta": 1},
+                    {
+                        "name": "orthogonal",
+                        "denoising_mode": "orthogonal",
+                        "beta": 1,
+                    },
+                    {
+                        "name": "iterative",
+                        "denoising_mode": "full",
+                        "beta": 4,
+                    },
+                    {
+                        "name": "iterative_orthogonal",
+                        "denoising_mode": "orthogonal",
+                        "beta": 4,
+                    },
+                ],
+            }
+        ),
+    )
+    assert len(methods) == 5
+    assert [method.beta for method in methods[1:]] == [1, 1, 4, 4]
+    assert {method.denoising_mode for method in methods[1:]} == {
+        "full",
+        "orthogonal",
+    }
 
 
 def test_distinct_n_uses_generated_token_ngrams():
@@ -303,6 +393,13 @@ def test_gpt2_benchmark_rejects_reduced_precision_vectors():
 def test_examples_html_filters_alpha_and_embeds_all_metadata(tmp_path):
     row = {
         "method": "raw",
+        "denoiser_name": "sigma_0p2",
+        "recovery_name": "orthogonal_denoise",
+        "denoising_mode": "orthogonal",
+        "beta": 1,
+        "denoiser_sigma": 0.2,
+        "denoiser_dropout": 0.0,
+        "denoiser_calls": 40,
         "vector_slug": "world",
         "vector_name": "World",
         "alpha": 0.5,
@@ -320,6 +417,10 @@ def test_examples_html_filters_alpha_and_embeds_all_metadata(tmp_path):
     path = write_examples_html([row], tmp_path / "examples.html")
     document = path.read_text(encoding="utf-8")
     assert 'id="alpha"' in document
+    assert 'id="recovery_name"' in document
+    assert 'id="beta"' in document
+    assert "orthogonal_denoise" in document
+    assert "denoiser_calls" in document
     assert "All generation metadata" in document
     assert "custom_metadata" in document
     assert "Dist-${order}" in document

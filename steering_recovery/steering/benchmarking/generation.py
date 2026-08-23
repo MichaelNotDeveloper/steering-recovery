@@ -20,6 +20,7 @@ class Continuation:
     full_text: str
     generated_token_ids: list[int]
     intervention_steps: int
+    denoiser_calls: int
     forward_calls: int
 
 
@@ -43,6 +44,8 @@ def generate_steered_continuation(
     intervention_mode: str,
     entropy_threshold: float,
     denoiser: DenoiserBundle | None,
+    denoising_mode: str = "full",
+    beta: int = 1,
     max_new_tokens: int,
     temperature: float,
     top_p: float,
@@ -71,6 +74,8 @@ def generate_steered_continuation(
         layer_path=layer_path,
         controller=controller,
         denoiser=denoiser,
+        denoising_mode=denoising_mode,
+        beta=beta,
     )
     generated: list[int] = []
     past_key_values = None
@@ -115,5 +120,6 @@ def generate_steered_continuation(
         full_text=full_text,
         generated_token_ids=generated,
         intervention_steps=controller.state.intervention_calls,
+        denoiser_calls=intervention.denoiser_calls,
         forward_calls=controller.state.forward_calls,
     )

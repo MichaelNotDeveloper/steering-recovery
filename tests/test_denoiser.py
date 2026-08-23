@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 import torch
 from torch import nn
@@ -52,6 +54,50 @@ def test_bundle_normalizes_and_checkpoint_roundtrips(tmp_path):
     assert metadata["format_version"] == 2
     assert metadata["step"] == 3
     assert loaded.model_config == bundle.model_config
+
+
+def test_dropout_checkpoint_roundtrips_in_eval_mode(tmp_path):
+    bundle = DenoiserBundle(
+        ActivationDenoiser(
+            hidden_size=4, latent_dim=8, num_layers=1, dropout=0.1
+        ),
+        ActivationNormalizer(torch.zeros(4), torch.ones(4)),
+    ).eval()
+    values = torch.randn(2, 4)
+    expected = bundle.denoise(values)
+    path = save_checkpoint(tmp_path / "dropout.pt", bundle, step=1, epoch=0)
+    loaded, _ = load_checkpoint(path)
+    assert loaded.model.config.dropout == 0.1
+    assert not loaded.model.training
+    torch.testing.assert_close(loaded.denoise(values), expected)
+
+
+class FixedDisplacementDenoiser(nn.Module):
+    def __init__(self, displacement):
+        super().__init__()
+        self.config = SimpleNamespace(hidden_size=len(displacement))
+        self.register_buffer("displacement", torch.tensor(displacement))
+        self.anchor = nn.Parameter(torch.zeros(()))
+
+    def forward(self, value):
+        return value + self.displacement.to(value)
+
+
+def test_orthogonal_denoising_removes_only_parallel_score_component():
+    bundle = DenoiserBundle(
+        FixedDisplacementDenoiser([1.0, 2.0, 0.0]),
+        ActivationNormalizer(torch.zeros(3), torch.tensor([2.0, 1.0, 1.0])),
+    )
+    steered = torch.tensor([[4.0, 3.0, 2.0]])
+    raw_delta = torch.tensor([[2.0, 0.0, 0.0]])
+    full = bundle.denoise_steered(steered, raw_delta, mode="full")
+    orthogonal = bundle.denoise_steered(
+        steered, raw_delta, mode="orthogonal"
+    )
+    torch.testing.assert_close(full, steered + torch.tensor([[2.0, 2.0, 0.0]]))
+    torch.testing.assert_close(
+        orthogonal, steered + torch.tensor([[0.0, 2.0, 0.0]])
+    )
 
 
 def test_gpt2_denoiser_precision_provenance_is_required():

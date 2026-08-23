@@ -25,12 +25,60 @@ model:
 
 steering_vectors_path: data/steering_vectors/ag_news/gpt2_layer_5/steering_vectors.pt
 
-# Every method is an intervention policy plus an optional post-steering denoiser.
-# Add more entries with unique names and paths to format_version=2 checkpoints.
+# Explicit baselines remain independent from the denoiser recovery grid below.
 methods:
   - name: raw
     intervention_mode: every_step
     denoiser_checkpoint: null
+
+# The benchmark expands every denoiser against all four recovery algorithms.
+# beta is an integer number of substeps; each substep adds alpha / beta.
+recovery:
+  beta: 4
+  standard_run_dir: runs/denoiser/2026-08-22/08-36-50
+  dropout_run_dir: runs/drouput_run
+  denoisers:
+    - name: denoiser_sigma_0p1
+      checkpoint: ${recovery.standard_run_dir}/models/latent_3072_layers_3_sigma_0p1/best.pt
+      sigma: 0.1
+      dropout: 0.0
+    - name: denoiser_sigma_0p2
+      checkpoint: ${recovery.standard_run_dir}/models/latent_3072_layers_3_sigma_0p2/best.pt
+      sigma: 0.2
+      dropout: 0.0
+    - name: denoiser_sigma_0p5
+      checkpoint: ${recovery.standard_run_dir}/models/latent_3072_layers_3_sigma_0p5/best.pt
+      sigma: 0.5
+      dropout: 0.0
+    - name: dropout_sigma_0p1
+      checkpoint: ${recovery.dropout_run_dir}/models/latent_3072_layers_3_sigma_0p1_dropout_0p1/best.pt
+      sigma: 0.1
+      dropout: 0.1
+    - name: dropout_sigma_0p2
+      checkpoint: ${recovery.dropout_run_dir}/models/latent_3072_layers_3_sigma_0p2_dropout_0p1/best.pt
+      sigma: 0.2
+      dropout: 0.1
+    - name: dropout_sigma_0p5
+      checkpoint: ${recovery.dropout_run_dir}/models/latent_3072_layers_3_sigma_0p5_dropout_0p1/best.pt
+      sigma: 0.5
+      dropout: 0.1
+  algorithms:
+    - name: denoise
+      intervention_mode: every_step
+      denoising_mode: full
+      beta: 1
+    - name: orthogonal_denoise
+      intervention_mode: every_step
+      denoising_mode: orthogonal
+      beta: 1
+    - name: iterative_denoise
+      intervention_mode: every_step
+      denoising_mode: full
+      beta: ${recovery.beta}
+    - name: iterative_orthogonal_denoise
+      intervention_mode: every_step
+      denoising_mode: orthogonal
+      beta: ${recovery.beta}
 
 alphas: [2.0, 4.0, 6.0, 8.0, 10.0]
 

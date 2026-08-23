@@ -62,6 +62,13 @@ def test_all_primary_configs_compose():
     assert steering_benchmark.slor.model_name == "gpt2-large"
     assert steering_benchmark.slor.dtype == "float16"
     assert steering_benchmark.slor.unigram.split == "train"
+    assert steering_benchmark.recovery.beta == 4
+    assert len(steering_benchmark.recovery.denoisers) == 6
+    assert len(steering_benchmark.recovery.algorithms) == 4
+    assert {
+        str(item.denoising_mode)
+        for item in steering_benchmark.recovery.algorithms
+    } == {"full", "orthogonal"}
 
 
 def test_sweep_config_registers_parameter_grid():

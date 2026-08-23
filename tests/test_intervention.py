@@ -48,3 +48,24 @@ def test_entropy_policy_is_causal():
 def test_invalid_mode_is_rejected():
     with pytest.raises(ValueError, match="mode"):
         InterventionController("sometimes", scale=1)
+
+
+def test_iterative_or_orthogonal_recovery_requires_a_denoiser():
+    model = ToyModel()
+    controller = InterventionController("every_step", scale=1)
+    with pytest.raises(ValueError, match="requires a denoiser"):
+        ActivationIntervention(
+            model,
+            torch.ones(4),
+            layer_index=0,
+            controller=controller,
+            beta=2,
+        )
+    with pytest.raises(ValueError, match="requires a denoiser"):
+        ActivationIntervention(
+            model,
+            torch.ones(4),
+            layer_index=0,
+            controller=controller,
+            denoising_mode="orthogonal",
+        )

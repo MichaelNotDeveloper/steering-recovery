@@ -10,6 +10,7 @@ from steering_recovery.layers import first_tensor, replace_first_tensor, resolve
 
 
 VALID_MODES = {"none", "once_at_start", "every_step", "entropy_threshold"}
+VALID_DENOISING_MODES = {"full", "orthogonal"}
 
 
 @dataclass
@@ -73,6 +74,8 @@ class ActivationIntervention:
         controller: InterventionController,
         layer_path: str | None = None,
         denoiser: DenoiserBundle | None = None,
+        denoising_mode: str = "full",
+        beta: int = 1,
     ):
         vector = torch.as_tensor(steering_vector).flatten()
         if vector.ndim != 1 or vector.numel() == 0:
@@ -83,6 +86,19 @@ class ActivationIntervention:
         self.layer_path = layer_path
         self.controller = controller
         self.denoiser = denoiser
+        if denoising_mode not in VALID_DENOISING_MODES:
+            raise ValueError(
+                f"denoising_mode must be one of {sorted(VALID_DENOISING_MODES)}"
+            )
+        if isinstance(beta, bool) or not isinstance(beta, int) or beta <= 0:
+            raise ValueError("beta must be a positive integer")
+        if denoiser is None and (denoising_mode != "full" or beta != 1):
+            raise ValueError(
+                "orthogonal or iterative recovery requires a denoiser"
+            )
+        self.denoising_mode = denoising_mode
+        self.beta = beta
+        self.denoiser_calls = 0
         self._handle: torch.utils.hooks.RemovableHandle | None = None
 
     def _hook(self, _module: nn.Module, _inputs: tuple[object, ...], output: object):
@@ -99,20 +115,27 @@ class ActivationIntervention:
         if edited.ndim == 2:
             target = edited
             raw_delta = delta.expand_as(target)
-            target = target + raw_delta
-            if self.denoiser is not None:
-                target = self._run_denoiser(target, raw_delta)
+            target = self._recover(target, raw_delta)
             edited = target
         elif edited.ndim == 3:
             target = edited[:, -1, :]
             raw_delta = delta.expand_as(target)
-            target = target + raw_delta
-            if self.denoiser is not None:
-                target = self._run_denoiser(target, raw_delta)
+            target = self._recover(target, raw_delta)
             edited[:, -1, :] = target
         else:
             raise ValueError(f"unsupported layer output shape {activations.shape}")
         return replace_first_tensor(output, edited)
+
+    def _recover(
+        self, target: torch.Tensor, raw_delta: torch.Tensor
+    ) -> torch.Tensor:
+        if self.denoiser is None:
+            return target + raw_delta
+        step_delta = raw_delta / self.beta
+        recovered = target
+        for _ in range(self.beta):
+            recovered = self._run_denoiser(recovered + step_delta, step_delta)
+        return recovered
 
     def _run_denoiser(
         self, target: torch.Tensor, raw_delta: torch.Tensor
@@ -121,7 +144,12 @@ class ActivationIntervention:
         parameter = next(self.denoiser.model.parameters())
         denoiser_target = target.to(device=parameter.device, dtype=parameter.dtype)
         denoiser_delta = raw_delta.to(device=parameter.device, dtype=parameter.dtype)
-        recovered = self.denoiser.denoise_steered(denoiser_target, denoiser_delta)
+        recovered = self.denoiser.denoise_steered(
+            denoiser_target,
+            denoiser_delta,
+            mode=self.denoising_mode,
+        )
+        self.denoiser_calls += 1
         return recovered.to(target)
 
     def __enter__(self) -> "ActivationIntervention":

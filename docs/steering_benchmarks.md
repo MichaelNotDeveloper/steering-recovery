@@ -12,15 +12,17 @@ post-steering denoiser на одной генеративной модели. В
 (steering vector, steering method, alpha)
 ```
 
-По умолчанию используются четыре сохранённых AG News-вектора, метод `raw` и
+По умолчанию используются четыре сохранённых AG News-вектора, базовый метод
+`raw`, 24 комбинации «6 denoiser × 4 recovery-алгоритма» и
 `alpha = [2, 4, 6, 8, 10]`. Для каждой точки выполняется 100 генераций.
-Следовательно, базовый конфиг делает `4 × 1 × 5 × 100 = 2000` генераций.
+Следовательно, полный конфиг делает `4 × 25 × 5 × 100 = 50000` генераций.
 
 `steering method` содержит:
 
 - policy вмешательства (`every_step`, `once_at_start` или
   `entropy_threshold`);
-- опциональный checkpoint post-steering denoiser.
+- опциональный checkpoint post-steering denoiser;
+- режим score-поправки (`full` или `orthogonal`) и число подшагов `beta`.
 
 Для `raw/every_step` выход выбранного GPT-2 block на каждом forward изменяется
 ровно как `h + αv`. При наличии denoiser сначала вычисляется `h + αv`, затем
@@ -126,23 +128,41 @@ methods:
     denoiser_checkpoint: null
 ```
 
-Несколько post-steering denoiser добавляются в тот же список:
+Шесть denoiser задаются отдельно от алгоритмов восстановления. Пайплайн строит
+их декартово произведение, поэтому checkpoint не нужно дублировать четыре раза:
 
 ```yaml
-methods:
-  - name: raw
-    intervention_mode: every_step
-    denoiser_checkpoint: null
-  - name: denoiser_sigma_0p2
-    intervention_mode: every_step
-    denoiser_checkpoint: /path/to/latent_3072_layers_5_sigma_0p2/best.pt
-  - name: denoiser_sigma_0p5
-    intervention_mode: every_step
-    denoiser_checkpoint: /path/to/latent_3072_layers_5_sigma_0p5/best.pt
+recovery:
+  beta: 4
+  denoisers:
+    - name: denoiser_sigma_0p2
+      checkpoint: /path/to/latent_3072_layers_3_sigma_0p2/best.pt
+      sigma: 0.2
+      dropout: 0.0
+  algorithms:
+    - name: denoise
+      denoising_mode: full
+      beta: 1
+    - name: orthogonal_denoise
+      denoising_mode: orthogonal
+      beta: 1
+    - name: iterative_denoise
+      denoising_mode: full
+      beta: ${recovery.beta}
+    - name: iterative_orthogonal_denoise
+      denoising_mode: orthogonal
+      beta: ${recovery.beta}
 ```
 
-Имя метода должно быть уникальным и filesystem-safe. Checkpoint загружается
-существующим `load_checkpoint` и должен иметь `format_version=2`.
+Текущий конфиг содержит три checkpoint без dropout и три с `dropout=0.1`, все
+с `latent_dim=3072`, тремя residual block и `sigma=0.1/0.2/0.5`. Checkpoint
+загружается существующим `load_checkpoint`, должен иметь `format_version=2` и
+за один benchmark-проход переиспользуется всеми четырьмя алгоритмами.
+
+Ортогональный вариант извлекает `D(x)-x = sigma² nabla log p_sigma(x)` и
+удаляет его проекцию на нормализованный steering vector. Итеративные варианты
+делают `beta` подшагов по `alpha / beta`. Полные формулы и псевдокод приведены
+в [структуре четырёх методов](steering_recovery_methods.md).
 
 ## Запуск
 
@@ -152,10 +172,25 @@ methods:
 python run_steering_benchmarks.py
 ```
 
+Если checkpoint перенесены, обе корневые директории переопределяются без
+изменения списка моделей:
+
+```bash
+python run_steering_benchmarks.py \
+  recovery.standard_run_dir=/path/to/denoiser/run \
+  recovery.dropout_run_dir=/path/to/drouput_run
+```
+
 Изменение сетки `alpha`:
 
 ```bash
 python run_steering_benchmarks.py 'alphas=[1,2,4,6,8,10,12]'
+```
+
+Изменение числа итеративных подшагов:
+
+```bash
+python run_steering_benchmarks.py recovery.beta=8
 ```
 
 Smoke-прогон допустим для проверки окружения, но не является каноническим
@@ -197,10 +232,11 @@ Condition JSONL содержит все 100 генераций, token IDs, вс�
 восемь генераций: по две для исходных тем World, Sports, Business и Sci/Tech.
 
 `examples.html` — автономная интерактивная галерея. В ней можно фильтровать
-примеры по `alpha`, steering vector, методу и исходной теме. У каждой генерации
-показываются prompt/continuation, основные метрики и раскрываемый полный JSON со
-всей сохранённой метаинформацией, включая token IDs, seed, checkpoint, режим и
-число вмешательств.
+примеры по `alpha`, steering vector, методу, denoiser, режиму восстановления,
+`beta`, `sigma`, dropout и исходной теме. У каждой генерации показываются
+prompt/continuation, основные метрики и раскрываемый полный JSON со всей
+сохранённой метаинформацией, включая token IDs, seed, checkpoint, режим, число
+вмешательств и число вызовов denoiser.
 
 Запуск возобновляемый. Завершённые condition-файлы с совпадающей сигнатурой
 пропускаются; незавершённая точка продолжается из `.partial.jsonl`. Новые

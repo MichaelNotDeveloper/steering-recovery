@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -39,10 +39,20 @@ def _shared_y_limits(
     return lower, upper
 
 
+def _horizontal_values(
+    rows: Sequence[dict[str, Any]], metric: str, vector_norm: float
+) -> np.ndarray:
+    alphas = np.asarray([float(row["alpha"]) for row in rows], dtype=np.float64)
+    if metric == "steering_projection_removal":
+        return alphas * vector_norm
+    return alphas
+
+
 def plot_epistemic_summaries(
     summaries: Sequence[dict[str, Any]],
     output_dir: str | Path,
     *,
+    vector_norms: Mapping[str, float],
     formats: Sequence[str],
     dpi: int,
 ) -> list[Path]:
@@ -54,6 +64,14 @@ def plot_epistemic_summaries(
     output_dir.mkdir(parents=True, exist_ok=True)
     sigmas = sorted({float(row["sigma"]) for row in summaries})
     vector_slugs = list(dict.fromkeys(str(row["vector_slug"]) for row in summaries))
+    missing_norms = set(vector_slugs) - vector_norms.keys()
+    if missing_norms:
+        raise ValueError(
+            f"missing L2 norms for steering vectors: {sorted(missing_norms)}"
+        )
+    resolved_norms = {slug: float(vector_norms[slug]) for slug in vector_slugs}
+    if any(not np.isfinite(value) or value <= 0 for value in resolved_norms.values()):
+        raise ValueError("steering vector L2 norms must be finite and positive")
     colors = matplotlib.colormaps["tab10"](np.linspace(0, 1, max(4, len(vector_slugs))))
     paths: list[Path] = []
     for metric, label in METRIC_LABELS.items():
@@ -79,23 +97,28 @@ def plot_epistemic_summaries(
                 )
                 if not group:
                     continue
-                alphas = np.asarray([float(row["alpha"]) for row in group])
+                x_values = _horizontal_values(
+                    group, metric, resolved_norms[vector_slug]
+                )
                 means = np.asarray([float(row[f"{metric}_mean"]) for row in group])
                 lower = np.asarray([float(row[f"{metric}_q25"]) for row in group])
                 upper = np.asarray([float(row[f"{metric}_q75"]) for row in group])
                 color = colors[vector_index]
                 axis.plot(
-                    alphas,
+                    x_values,
                     means,
                     marker="o",
                     linewidth=2,
                     color=color,
                     label=str(group[0]["vector_name"]),
                 )
-                axis.fill_between(alphas, lower, upper, color=color, alpha=0.14)
+                axis.fill_between(x_values, lower, upper, color=color, alpha=0.14)
             axis.set_title(f"Denoiser σ = {sigma:g}")
-            axis.set_xlabel("Steering strength α")
-            axis.set_xticks(sorted({float(row["alpha"]) for row in summaries}))
+            if metric == "steering_projection_removal":
+                axis.set_xlabel("Steering displacement norm α·||v||₂")
+            else:
+                axis.set_xlabel("Steering strength α")
+                axis.set_xticks(sorted({float(row["alpha"]) for row in summaries}))
             axis.grid(True, alpha=0.22)
         axes[0, 0].set_ylim(*y_limits)
         axes[0, 0].set_ylabel(label)

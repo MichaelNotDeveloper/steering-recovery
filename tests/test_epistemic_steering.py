@@ -9,6 +9,7 @@ from steering_recovery.steering.epistemic.generation import (
     generate_epistemic_continuation,
 )
 from steering_recovery.steering.epistemic.plotting import (
+    _horizontal_values,
     _shared_y_limits,
     plot_epistemic_summaries,
 )
@@ -164,7 +165,11 @@ def test_epistemic_summary_plots_and_html(tmp_path):
     assert len(summaries) == 16
     assert all(summary["tokens"] == 3 for summary in summaries)
     plot_paths = plot_epistemic_summaries(
-        summaries, tmp_path / "plots", formats=["png"], dpi=72
+        summaries,
+        tmp_path / "plots",
+        vector_norms={"world": 2.0, "sports": 3.0},
+        formats=["png"],
+        dpi=72,
     )
     assert len(plot_paths) == len(METRIC_LABELS)
     assert all(path.is_file() for path in plot_paths)
@@ -193,6 +198,14 @@ def test_shared_plot_limits_include_every_sigma_and_uncertainty_band():
     lower, upper = _shared_y_limits(summaries, metric)
     assert lower == 0
     assert upper > 25.0
+
+
+def test_projection_removal_uses_steering_displacement_norm_on_x_axis():
+    rows = [{"alpha": 6.0}, {"alpha": 10.0}]
+    values = _horizontal_values(rows, "steering_projection_removal", 2.5)
+    assert values.tolist() == [15.0, 25.0]
+    baseline_values = _horizontal_values(rows, "score_inverse_snr", 2.5)
+    assert baseline_values.tolist() == [6.0, 10.0]
 
 
 def test_epistemic_examples_are_balanced_across_source_topics():

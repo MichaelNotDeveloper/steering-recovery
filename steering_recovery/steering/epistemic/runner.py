@@ -551,6 +551,10 @@ def run_epistemic_steering(
     plot_paths = plot_epistemic_summaries(
         summaries,
         output_dir / "plots",
+        vector_norms={
+            vector.slug: float(torch.linalg.vector_norm(vector.vector))
+            for vector in vectors
+        },
         formats=[str(value) for value in config.plot.formats],
         dpi=int(config.plot.dpi),
     )

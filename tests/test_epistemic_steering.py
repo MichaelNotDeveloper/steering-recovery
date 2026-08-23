@@ -9,6 +9,7 @@ from steering_recovery.steering.epistemic.generation import (
     generate_epistemic_continuation,
 )
 from steering_recovery.steering.epistemic.plotting import (
+    _shared_y_limits,
     plot_epistemic_summaries,
 )
 from steering_recovery.steering.epistemic.reporting import (
@@ -155,6 +156,15 @@ def test_epistemic_summary_plots_and_html(tmp_path):
     assert r"prompt \u003cunsafe\u003e" in html
     for metric in METRIC_LABELS:
         assert metric in html
+
+
+def test_shared_plot_limits_include_every_sigma_and_uncertainty_band():
+    summaries = summarize_token_metrics(_condition_rows())
+    metric = "score_mean_deviation"
+    summaries[-1][f"{metric}_q75"] = 25.0
+    lower, upper = _shared_y_limits(summaries, metric)
+    assert lower == 0
+    assert upper > 25.0
 
 
 def test_epistemic_examples_are_balanced_across_source_topics():

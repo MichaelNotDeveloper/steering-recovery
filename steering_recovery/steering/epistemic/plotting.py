@@ -13,6 +13,32 @@ import matplotlib.pyplot as plt  # noqa: E402
 from steering_recovery.steering.epistemic.statistics import METRIC_LABELS
 
 
+def _shared_y_limits(
+    summaries: Sequence[dict[str, Any]], metric: str
+) -> tuple[float, float]:
+    """Return padded limits containing every mean and interquartile band."""
+
+    values = np.asarray(
+        [
+            float(row[f"{metric}_{statistic}"])
+            for row in summaries
+            for statistic in ("mean", "q25", "q75")
+        ],
+        dtype=np.float64,
+    )
+    if not np.isfinite(values).all():
+        raise ValueError(f"cannot plot non-finite {metric} values")
+    minimum = float(values.min())
+    maximum = float(values.max())
+    scale = max(maximum - minimum, abs(minimum), abs(maximum), 1e-12)
+    padding = 0.06 * scale
+    lower = 0.0 if minimum >= 0 else minimum - padding
+    upper = maximum + padding
+    if upper <= lower:
+        upper = lower + 1.0
+    return lower, upper
+
+
 def plot_epistemic_summaries(
     summaries: Sequence[dict[str, Any]],
     output_dir: str | Path,
@@ -31,6 +57,7 @@ def plot_epistemic_summaries(
     colors = matplotlib.colormaps["tab10"](np.linspace(0, 1, max(4, len(vector_slugs))))
     paths: list[Path] = []
     for metric, label in METRIC_LABELS.items():
+        y_limits = _shared_y_limits(summaries, metric)
         figure, axes = plt.subplots(
             1,
             len(sigmas),
@@ -69,8 +96,8 @@ def plot_epistemic_summaries(
             axis.set_title(f"Denoiser σ = {sigma:g}")
             axis.set_xlabel("Steering strength α")
             axis.set_xticks(sorted({float(row["alpha"]) for row in summaries}))
-            axis.set_ylim(bottom=0)
             axis.grid(True, alpha=0.22)
+        axes[0, 0].set_ylim(*y_limits)
         axes[0, 0].set_ylabel(label)
         handles, labels = axes[0, 0].get_legend_handles_labels()
         figure.legend(

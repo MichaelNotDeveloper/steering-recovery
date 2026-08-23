@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import pytest
 import torch
 from torch import nn
 
@@ -21,6 +22,7 @@ from steering_recovery.steering.epistemic.statistics import (
     METRIC_LABELS,
     denoising_geometry_statistics,
     mc_dropout_statistics,
+    score_steering_geometry_statistics,
     summarize_token_metrics,
 )
 
@@ -79,6 +81,20 @@ def test_denoising_geometry_measures_raw_l2_and_projection_removal():
     assert values["steering_projection_removal"] == 5.0
 
 
+def test_score_steering_geometry_uses_negative_direction_and_actual_score():
+    values = score_steering_geometry_statistics(
+        torch.zeros(2),
+        torch.tensor([[-4.0, 8.0], [-4.0, -8.0]]),
+        torch.tensor([1.0, 0.0]),
+        noise_sigma=2.0,
+    )
+    expected_distance = 1 - 1 / 5**0.5
+    assert values["score_negative_steering_cosine_distance"] == pytest.approx(
+        expected_distance
+    )
+    assert values["score_orthogonal_norm"] == pytest.approx(2.0)
+
+
 def test_epistemic_generation_records_one_mc_statistic_per_token():
     torch.manual_seed(4)
     model = TinyCausalLM().eval()
@@ -96,6 +112,7 @@ def test_epistemic_generation_records_one_mc_statistic_per_token():
         layer_index=0,
         layer_path="transformer.h",
         mc_samples=20,
+        noise_sigma=0.5,
         max_new_tokens=4,
         temperature=0,
         top_p=1,

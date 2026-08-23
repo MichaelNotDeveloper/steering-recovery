@@ -50,7 +50,7 @@ from steering_recovery.steering.epistemic.statistics import (
 
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
-_DIAGNOSTICS_VERSION = 2
+_DIAGNOSTICS_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -491,6 +491,7 @@ def run_epistemic_steering(
                             layer_index=int(config.model.layer_index),
                             layer_path=config.model.layer_path,
                             mc_samples=mc_samples,
+                            noise_sigma=denoiser_spec.sigma,
                             max_new_tokens=new_tokens,
                             temperature=float(config.generation.temperature),
                             top_p=float(config.generation.top_p),
@@ -567,6 +568,8 @@ def run_epistemic_steering(
         "model_dtype": str(config.model.dtype),
         "mc_samples": mc_samples,
         "score_definition": "delta_i = D(z)_i - z = sigma^2 * grad log p_sigma(z)",
+        "actual_score_definition": "score_i = (D(z)_i - z) / sigma^2",
+        "normalized_steering_direction": "u = (v / std) / ||v / std||_2",
         "coordinate_systems": {
             "score_and_prediction_metrics": "feature-wise normalized hidden space",
             "denoiser_error_and_projection": "raw GPT-2 hidden space",

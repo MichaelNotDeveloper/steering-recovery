@@ -14,6 +14,10 @@ METRIC_LABELS: Mapping[str, str] = {
     "score_cosine_distance_variance": "Variance of cosine distance to Eδ",
     "score_pairwise_cosine_distance": "Mean pairwise cosine distance between δᵢ",
     "score_inverse_snr": "Inverse score SNR: mean ||δᵢ − Eδ||₂ / ||Eδ||₂",
+    "score_negative_steering_cosine_distance": (
+        "Mean cosine distance: score vs. −steering"
+    ),
+    "score_orthogonal_norm": "Mean ||score orthogonal to steering||₂",
     "prediction_mean_deviation": "Prediction dispersion: mean ||Dᵢ − ED||₂",
     "denoiser_l2_error": "Denoiser error: ||ED(h + αv) − h||₂",
     "steering_projection_removal": "Steering projection change after denoising",
@@ -82,6 +86,65 @@ def mc_dropout_statistics(
         "score_pairwise_cosine_distance": float(pairwise_cosine_distance),
         "score_inverse_snr": float(inverse_snr),
         "prediction_mean_deviation": float(prediction_deviations.mean()),
+    }
+
+
+def score_steering_geometry_statistics(
+    normalized_input: torch.Tensor,
+    normalized_predictions: torch.Tensor,
+    normalized_steering_vector: torch.Tensor,
+    *,
+    noise_sigma: float,
+) -> dict[str, float]:
+    """Compare denoiser score samples with steering in normalized coordinates."""
+
+    if normalized_input.ndim != 1:
+        raise ValueError("normalized_input must have shape [hidden_size]")
+    if (
+        normalized_predictions.ndim != 2
+        or normalized_predictions.shape[1] != normalized_input.numel()
+    ):
+        raise ValueError(
+            "normalized_predictions must have shape [samples, hidden_size]"
+        )
+    vector = (
+        torch.as_tensor(normalized_steering_vector).flatten().to(normalized_input)
+    )
+    if vector.shape != normalized_input.shape:
+        raise ValueError("normalized steering vector and input must have equal shapes")
+    if not (
+        torch.isfinite(normalized_input).all()
+        and torch.isfinite(normalized_predictions).all()
+        and torch.isfinite(vector).all()
+    ):
+        raise ValueError("score steering geometry contains non-finite values")
+    vector_norm = torch.linalg.vector_norm(vector)
+    if float(vector_norm) == 0:
+        raise ValueError("normalized steering vector must have non-zero norm")
+    sigma = float(noise_sigma)
+    if not np.isfinite(sigma) or sigma <= 0:
+        raise ValueError("noise_sigma must be finite and positive")
+
+    score_samples = (
+        normalized_predictions - normalized_input.unsqueeze(0)
+    ) / sigma**2
+    steering_direction = vector / vector_norm
+    negative_direction = -steering_direction.unsqueeze(0).expand_as(score_samples)
+    cosine_distances = 1 - functional.cosine_similarity(
+        score_samples,
+        negative_direction,
+        dim=-1,
+        eps=_COSINE_EPS,
+    )
+    parallel_components = (
+        score_samples @ steering_direction
+    ).unsqueeze(-1) * steering_direction
+    orthogonal_lengths = torch.linalg.vector_norm(
+        score_samples - parallel_components, dim=-1
+    )
+    return {
+        "score_negative_steering_cosine_distance": float(cosine_distances.mean()),
+        "score_orthogonal_norm": float(orthogonal_lengths.mean()),
     }
 
 

@@ -56,7 +56,7 @@ GPT-2 токена статьи. Генерируются 40 новых токе
 3. выполняются 20 forward с разными dropout masks;
 4. среднее из 20 предсказаний денормализуется и передаётся следующим слоям
    GPT-2;
-5. восемь отображаемых диагностик и длины steering-проекции до/после denoiser
+5. десять отображаемых диагностик и длины steering-проекции до/после denoiser
    прикрепляются к предсказанному на этом шаге токену.
 
 Полный запуск содержит 64 условия, 6 400 генераций, 256 000 диагностированных
@@ -98,6 +98,21 @@ prediction_mean_deviation = mean_i ||D_i(z) - mean(D(z))||_2
 Перечисленные score-метрики и разброс предсказаний остаются в нормализованных
 координатах denoiser, чтобы их масштаб соответствовал обучающему `sigma`.
 
+Для двух метрик направления сначала восстанавливается настоящая score-функция
+`s_i = delta_i / sigma²`. Steering-вектор переводится в ту же нормализованную
+систему координат: `v_z = v / std`, `u = v_z / ||v_z||₂`. Затем считаются:
+
+```text
+score_negative_steering_cosine_distance =
+    mean_i [1 - cosine(s_i, -u)]
+s_i_orthogonal = s_i - <s_i, u> u
+score_orthogonal_norm = mean_i ||s_i_orthogonal||_2
+```
+
+Минус перед `u` в первой формуле означает, что нулевое расстояние соответствует
+score, направленному точно против внесённого steering-смещения. Ортогонализация
+во второй формуле удаляет компоненту score вдоль steering в обе стороны.
+
 Для геометрических метрик используются исходные GPT-2 hidden coordinates. Пусть
 `h_s = h + alpha * v`, `u = v / ||v||`, а `h_d` — денормализованное среднее 20
 MC-предсказаний:
@@ -131,6 +146,8 @@ run/
 │   ├── score_cosine_distance_variance.png
 │   ├── score_pairwise_cosine_distance.png
 │   ├── score_inverse_snr.png
+│   ├── score_negative_steering_cosine_distance.png
+│   ├── score_orthogonal_norm.png
 │   ├── prediction_mean_deviation.png
 │   ├── denoiser_l2_error.png
 │   └── steering_projection_removal.png
@@ -147,13 +164,13 @@ steering-векторам. Для `steering_projection_removal` ось X пок�
 панелями.
 
 `examples.html` содержит четыре примера на каждое условие — по одному исходному
-классу AG News. Можно выбрать `sigma`, вектор, `alpha` и одну из восьми
+классу AG News. Можно выбрать `sigma`, вектор, `alpha` и одну из десяти
 статистик. Подсветка токена нормируется по общему 5–95% диапазону выбранной
 метрики; tooltip показывает точное несокращённое значение выбранной сейчас
 метрики. В карточке также доступны prompt, seeds, checkpoint, SHA256 и полные
 метаданные генерации.
 
-Новые геометрические и попарные метрики требуют исходных hidden и MC samples,
-которые не сохранялись в старом формате. Версия diagnostics входит в resume
-signature, поэтому запуск в прежнюю output-директорию пересчитает condition
-JSONL, а не смешает старые и новые token statistics.
+Новые геометрические, попарные и score/steering-метрики требуют исходных hidden
+и MC samples, которые не сохранялись в старом формате. Версия diagnostics
+входит в resume signature, поэтому запуск в прежнюю output-директорию
+пересчитает condition JSONL, а не смешает старые и новые token statistics.

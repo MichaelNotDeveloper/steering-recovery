@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Iterator, Sequence
@@ -13,6 +14,7 @@ from steering_recovery.layers import first_tensor, replace_first_tensor, resolve
 from steering_recovery.steering.epistemic.statistics import (
     denoising_geometry_statistics,
     mc_dropout_statistics,
+    score_steering_geometry_statistics,
 )
 
 
@@ -66,6 +68,7 @@ class EpistemicActivationIntervention:
         layer_index: int,
         layer_path: str | None,
         mc_samples: int,
+        noise_sigma: float,
     ):
         if mc_samples < 2:
             raise ValueError("mc_samples must be at least two")
@@ -81,6 +84,9 @@ class EpistemicActivationIntervention:
         self.layer_index = int(layer_index)
         self.layer_path = layer_path
         self.mc_samples = int(mc_samples)
+        self.noise_sigma = float(noise_sigma)
+        if not math.isfinite(self.noise_sigma) or self.noise_sigma <= 0:
+            raise ValueError("noise_sigma must be finite and positive")
         self.statistics: list[dict[str, float | int]] = []
         self.forward_calls = 0
         self._handle: torch.utils.hooks.RemovableHandle | None = None
@@ -107,6 +113,17 @@ class EpistemicActivationIntervention:
             normalized.unsqueeze(0).expand(self.mc_samples, -1)
         )
         metrics = mc_dropout_statistics(normalized, predictions)
+        normalized_vector = self.denoiser.normalizer.normalize_delta(
+            self.vector.to(denoiser_input)
+        )
+        metrics.update(
+            score_steering_geometry_statistics(
+                normalized,
+                predictions,
+                normalized_vector,
+                noise_sigma=self.noise_sigma,
+            )
+        )
         recovered = self.denoiser.normalizer.denormalize(
             predictions.mean(dim=0, keepdim=True)
         ).to(target)
@@ -152,6 +169,7 @@ def generate_epistemic_continuation(
     layer_index: int,
     layer_path: str | None,
     mc_samples: int,
+    noise_sigma: float,
     max_new_tokens: int,
     temperature: float,
     top_p: float,
@@ -177,6 +195,7 @@ def generate_epistemic_continuation(
         layer_index=layer_index,
         layer_path=layer_path,
         mc_samples=mc_samples,
+        noise_sigma=noise_sigma,
     )
     generated: list[int] = []
     past_key_values = None

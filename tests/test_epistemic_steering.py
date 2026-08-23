@@ -18,6 +18,7 @@ from steering_recovery.steering.epistemic.reporting import (
 from steering_recovery.steering.epistemic.runner import _select_examples
 from steering_recovery.steering.epistemic.statistics import (
     METRIC_LABELS,
+    denoising_geometry_statistics,
     mc_dropout_statistics,
     summarize_token_metrics,
 )
@@ -49,12 +50,32 @@ class TinyCausalLM(nn.Module):
 def test_mc_dropout_statistics_match_requested_definitions():
     values = mc_dropout_statistics(
         torch.zeros(2),
-        torch.tensor([[1.0, 0.0], [-1.0, 0.0]]),
+        torch.tensor([[1.0, 0.0], [3.0, 0.0]]),
     )
     assert values["score_mean_deviation"] == 1.0
-    assert values["score_length_variance"] == 0.0
+    assert values["score_length_variance"] == 1.0
     assert values["score_cosine_distance_variance"] == 0.0
+    assert values["score_pairwise_cosine_distance"] == 0.0
+    assert values["score_inverse_snr"] == 0.5
     assert values["prediction_mean_deviation"] == 1.0
+    opposite = mc_dropout_statistics(
+        torch.zeros(2), torch.tensor([[1.0, 0.0], [-1.0, 0.0]])
+    )
+    assert opposite["score_pairwise_cosine_distance"] == 2.0
+
+
+def test_denoising_geometry_measures_raw_l2_and_projection_removal():
+    original = torch.tensor([1.0, 2.0])
+    vector = torch.tensor([3.0, 4.0])
+    steered = original + 2 * vector
+    recovered = original + vector
+    values = denoising_geometry_statistics(
+        original, steered, recovered, vector
+    )
+    assert values["denoiser_l2_error"] == 5.0
+    assert values["steering_projection_before"] == 10.0
+    assert values["steering_projection_after"] == 5.0
+    assert values["steering_projection_removal"] == 5.0
 
 
 def test_epistemic_generation_records_one_mc_statistic_per_token():
@@ -87,6 +108,10 @@ def test_epistemic_generation_records_one_mc_statistic_per_token():
     assert denoiser.model.training is False
     assert all(
         set(METRIC_LABELS).issubset(token) for token in continuation.token_statistics
+    )
+    assert all(
+        {"steering_projection_before", "steering_projection_after"}.issubset(token)
+        for token in continuation.token_statistics
     )
     assert all(
         value >= 0
@@ -154,6 +179,9 @@ def test_epistemic_summary_plots_and_html(tmp_path):
     assert "MC-dropout epistemic steering" in html
     assert "prompt <unsafe>" not in html
     assert r"prompt \u003cunsafe\u003e" in html
+    assert "tokenTitle(token,metric)" in html
+    assert "String(token[metric])" in html
+    assert "span.title=title" in html
     for metric in METRIC_LABELS:
         assert metric in html
 

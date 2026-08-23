@@ -149,7 +149,8 @@ python run_epistemic_steering.py denoiser_run_dir=/path/to/training/run
 
 Первый этап обучает три `3 × 3072` denoiser с `dropout=0.1` для
 `sigma=[0.1,0.2,0.5]`. Второй прогоняет каждый steered hidden 20 раз, сохраняет
-четыре меры разброса, строит графики и интерактивную токенную HTML-галерею.
+восемь мер разброса и геометрии steering, строит графики и интерактивную
+токенную HTML-галерею.
 Подробности: [epistemic steering](docs/epistemic_steering.md).
 
 Все параметры можно переопределять из CLI. Подробности: [архитектура](docs/architecture.md),

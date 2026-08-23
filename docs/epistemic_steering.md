@@ -55,7 +55,8 @@ GPT-2 токена статьи. Генерируются 40 новых токе
 3. выполняются 20 forward с разными dropout masks;
 4. среднее из 20 предсказаний денормализуется и передаётся следующим слоям
    GPT-2;
-5. четыре статистики прикрепляются к предсказанному на этом шаге токену.
+5. восемь отображаемых диагностик и длины steering-проекции до/после denoiser
+   прикрепляются к предсказанному на этом шаге токену.
 
 Полный запуск содержит 48 условий, 4 800 генераций, 192 000 диагностированных
 token hidden states и 3 840 000 MC-предсказаний denoiser. Условия сохраняются
@@ -86,13 +87,30 @@ score_mean_deviation = mean_i ||delta_i - mean(delta)||_2
 score_length_variance = Var_i[||delta_i||_2]
 cosine_i = 1 - cosine(delta_i, mean(delta))
 score_cosine_distance_variance = Var_i[cosine_i]
+score_pairwise_cosine_distance = mean_{i<j}[1 - cosine(delta_i, delta_j)]
+score_inverse_snr = mean_i ||delta_i - mean(delta)||_2 / ||mean(delta)||_2
 prediction_mean_deviation = mean_i ||D_i(z) - mean(D(z))||_2
 ```
 
-Все variance являются population variance (`correction=0`). Первые три метрики
-характеризуют неопределённость `sigma² * score`, четвёртая — полный разброс
-предсказаний denoiser. В raw GPT-координаты метрики не переводятся, чтобы их
-масштаб соответствовал `sigma`, на котором обучалась модель.
+Все variance являются population variance (`correction=0`). Для inverse SNR
+нулевой знаменатель стабилизируется через `max(||mean(delta)||₂, 1e-8)`.
+Перечисленные score-метрики и разброс предсказаний остаются в нормализованных
+координатах denoiser, чтобы их масштаб соответствовал обучающему `sigma`.
+
+Для геометрических метрик используются исходные GPT-2 hidden coordinates. Пусть
+`h_s = h + alpha * v`, `u = v / ||v||`, а `h_d` — денормализованное среднее 20
+MC-предсказаний:
+
+```text
+denoiser_l2_error = ||h_d - h||_2
+projection_before = <h_s - h, u> * u
+projection_after = <h_d - h, u> * u
+steering_projection_removal = ||projection_before - projection_after||_2
+```
+
+В token metadata дополнительно сохраняются длины `projection_before` и
+`projection_after`, поэтому можно отличить удаление steering-компоненты от её
+усиления.
 
 ## Результаты
 
@@ -110,7 +128,11 @@ run/
 │   ├── score_mean_deviation.png
 │   ├── score_length_variance.png
 │   ├── score_cosine_distance_variance.png
-│   └── prediction_mean_deviation.png
+│   ├── score_pairwise_cosine_distance.png
+│   ├── score_inverse_snr.png
+│   ├── prediction_mean_deviation.png
+│   ├── denoiser_l2_error.png
+│   └── steering_projection_removal.png
 ├── examples.html
 └── manifest.json
 ```
@@ -122,7 +144,13 @@ IQR сразу для всех `sigma` с дополнительным отст�
 не обрезаются и остаются сравнимыми между панелями.
 
 `examples.html` содержит четыре примера на каждое условие — по одному исходному
-классу AG News. Можно выбрать `sigma`, вектор, `alpha` и одну из четырёх
+классу AG News. Можно выбрать `sigma`, вектор, `alpha` и одну из восьми
 статистик. Подсветка токена нормируется по общему 5–95% диапазону выбранной
-метрики; tooltip показывает точные значения всех статистик. В карточке также
-доступны prompt, seeds, checkpoint, SHA256 и полные метаданные генерации.
+метрики; tooltip показывает точное несокращённое значение выбранной сейчас
+метрики. В карточке также доступны prompt, seeds, checkpoint, SHA256 и полные
+метаданные генерации.
+
+Новые геометрические и попарные метрики требуют исходных hidden и MC samples,
+которые не сохранялись в старом формате. Версия diagnostics входит в resume
+signature, поэтому запуск в прежнюю output-директорию пересчитает condition
+JSONL, а не смешает старые и новые token statistics.

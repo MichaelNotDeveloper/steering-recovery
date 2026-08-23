@@ -10,7 +10,10 @@ from torch import nn
 from steering_recovery.denoiser import DenoiserBundle
 from steering_recovery.generation import sample_token
 from steering_recovery.layers import first_tensor, replace_first_tensor, resolve_layer
-from steering_recovery.steering.epistemic.statistics import mc_dropout_statistics
+from steering_recovery.steering.epistemic.statistics import (
+    denoising_geometry_statistics,
+    mc_dropout_statistics,
+)
 
 
 @dataclass(frozen=True)
@@ -69,6 +72,8 @@ class EpistemicActivationIntervention:
         vector = torch.as_tensor(steering_vector).float().flatten()
         if not vector.numel():
             raise ValueError("steering_vector must not be empty")
+        if float(torch.linalg.vector_norm(vector)) == 0:
+            raise ValueError("steering_vector must have non-zero norm")
         self.model = model
         self.denoiser = denoiser
         self.vector = vector
@@ -102,10 +107,18 @@ class EpistemicActivationIntervention:
             normalized.unsqueeze(0).expand(self.mc_samples, -1)
         )
         metrics = mc_dropout_statistics(normalized, predictions)
-        self.statistics.append({"step": len(self.statistics), **metrics})
         recovered = self.denoiser.normalizer.denormalize(
             predictions.mean(dim=0, keepdim=True)
         ).to(target)
+        metrics.update(
+            denoising_geometry_statistics(
+                target[0],
+                steered[0],
+                recovered[0],
+                self.vector.to(target),
+            )
+        )
+        self.statistics.append({"step": len(self.statistics), **metrics})
         if edited.ndim == 2:
             edited = recovered
         else:

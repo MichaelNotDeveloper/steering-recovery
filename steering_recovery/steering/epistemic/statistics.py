@@ -12,8 +12,15 @@ METRIC_LABELS: Mapping[str, str] = {
     "score_mean_deviation": "Score dispersion: mean ||δᵢ − Eδ||₂",
     "score_length_variance": "Variance of ||δᵢ||₂",
     "score_cosine_distance_variance": "Variance of cosine distance to Eδ",
+    "score_pairwise_cosine_distance": "Mean pairwise cosine distance between δᵢ",
+    "score_inverse_snr": "Inverse score SNR: mean ||δᵢ − Eδ||₂ / ||Eδ||₂",
     "prediction_mean_deviation": "Prediction dispersion: mean ||Dᵢ − ED||₂",
+    "denoiser_l2_error": "Denoiser error: ||ED(h + αv) − h||₂",
+    "steering_projection_removal": "Steering projection change after denoising",
 }
+
+_COSINE_EPS = 1e-8
+_SNR_EPS = 1e-8
 
 
 def mc_dropout_statistics(
@@ -46,7 +53,22 @@ def mc_dropout_statistics(
         score_samples,
         mean_score.unsqueeze(0).expand_as(score_samples),
         dim=-1,
-        eps=1e-8,
+        eps=_COSINE_EPS,
+    )
+    score_directions = functional.normalize(
+        score_samples, p=2, dim=-1, eps=_COSINE_EPS
+    )
+    pair_count = len(score_samples) * (len(score_samples) - 1) / 2
+    pairwise_similarity_sum = (
+        torch.linalg.vector_norm(score_directions.sum(dim=0)).square()
+        - score_directions.square().sum()
+    ) / 2
+    pairwise_cosine_distance = (
+        1 - pairwise_similarity_sum / pair_count
+    ).clamp(0, 2)
+    score_mean_deviation = score_deviations.mean()
+    inverse_snr = score_mean_deviation / torch.linalg.vector_norm(mean_score).clamp_min(
+        _SNR_EPS
     )
 
     mean_prediction = normalized_predictions.mean(dim=0)
@@ -54,10 +76,56 @@ def mc_dropout_statistics(
         normalized_predictions - mean_prediction.unsqueeze(0), dim=-1
     )
     return {
-        "score_mean_deviation": float(score_deviations.mean()),
+        "score_mean_deviation": float(score_mean_deviation),
         "score_length_variance": float(score_lengths.var(correction=0)),
         "score_cosine_distance_variance": float(cosine_distances.var(correction=0)),
+        "score_pairwise_cosine_distance": float(pairwise_cosine_distance),
+        "score_inverse_snr": float(inverse_snr),
         "prediction_mean_deviation": float(prediction_deviations.mean()),
+    }
+
+
+def denoising_geometry_statistics(
+    original_hidden: torch.Tensor,
+    steered_hidden: torch.Tensor,
+    recovered_hidden: torch.Tensor,
+    steering_vector: torch.Tensor,
+) -> dict[str, float]:
+    """Measure denoising error and steering-axis change in raw GPT coordinates."""
+
+    tensors = [
+        torch.as_tensor(value).flatten()
+        for value in (
+            original_hidden,
+            steered_hidden,
+            recovered_hidden,
+            steering_vector,
+        )
+    ]
+    if not all(tensor.shape == tensors[0].shape for tensor in tensors):
+        raise ValueError("hidden states and steering_vector must have equal shapes")
+    if not all(torch.isfinite(tensor).all() for tensor in tensors):
+        raise ValueError("denoising geometry contains non-finite values")
+    original, steered, recovered, vector = tensors
+    vector_norm = torch.linalg.vector_norm(vector)
+    if float(vector_norm) == 0:
+        raise ValueError("steering_vector must have non-zero norm")
+    direction = vector / vector_norm
+    before_scalar = torch.dot(steered - original, direction)
+    after_scalar = torch.dot(recovered - original, direction)
+    before_projection = before_scalar * direction
+    after_projection = after_scalar * direction
+    return {
+        "denoiser_l2_error": float(torch.linalg.vector_norm(recovered - original)),
+        "steering_projection_before": float(
+            torch.linalg.vector_norm(before_projection)
+        ),
+        "steering_projection_after": float(
+            torch.linalg.vector_norm(after_projection)
+        ),
+        "steering_projection_removal": float(
+            torch.linalg.vector_norm(before_projection - after_projection)
+        ),
     }
 
 

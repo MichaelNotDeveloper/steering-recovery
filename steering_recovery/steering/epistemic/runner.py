@@ -50,6 +50,7 @@ from steering_recovery.steering.epistemic.statistics import (
 
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
+_DIAGNOSTICS_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -417,6 +418,7 @@ def run_epistemic_steering(
         for alpha in alphas
     ]
     base_signature = {
+        "diagnostics_version": _DIAGNOSTICS_VERSION,
         "model": config_to_dict(config.model),
         "generation": config_to_dict(config.generation),
         "mc_dropout": config_to_dict(config.mc_dropout),
@@ -561,8 +563,12 @@ def run_epistemic_steering(
         "model_dtype": str(config.model.dtype),
         "mc_samples": mc_samples,
         "score_definition": "delta_i = D(z)_i - z = sigma^2 * grad log p_sigma(z)",
-        "coordinate_system": "feature-wise normalized hidden space",
+        "coordinate_systems": {
+            "score_and_prediction_metrics": "feature-wise normalized hidden space",
+            "denoiser_error_and_projection": "raw GPT-2 hidden space",
+        },
         "prediction_used_for_generation": "mean of MC-dropout predictions",
+        "diagnostics_version": _DIAGNOSTICS_VERSION,
         "metrics": dict(METRIC_LABELS),
         "resolved_config": config_to_dict(config),
     }
@@ -581,7 +587,7 @@ def run_epistemic_steering(
         metadata=report_metadata,
     )
     manifest = {
-        "format_version": 1,
+        "format_version": 2,
         "conditions": len(conditions),
         "generations": len(all_rows),
         "token_statistics": sum(len(row["token_statistics"]) for row in all_rows),

@@ -4,7 +4,7 @@
 
 Эксперимент измеряет, насколько необычными для denoiser становятся hidden states
 после сильного steering. Он использует четыре FP32 Difference-of-Means вектора
-AG News, `alpha=[6,8,10,20]` и четыре denoiser для `sigma=[0.1,0.2,0.5,1.0]`.
+AG News, `alpha=[6,8,10,20]` и три denoiser для `sigma=[0.1,0.2,0.5]`.
 
 Каждый residual block denoiser имеет вид:
 
@@ -22,13 +22,12 @@ Linear(768 -> 3072) -> GELU -> Linear(3072 -> 768) -> Dropout(0.1) + skip
 python train_denoiser.py experiment=epistemic_dropout
 ```
 
-Preset `configs/experiment/epistemic_dropout.yaml` обучает ровно четыре модели:
+Preset `configs/experiment/epistemic_dropout.yaml` обучает ровно три модели:
 
 ```text
 latent_3072_layers_3_sigma_0p1_dropout_0p1
 latent_3072_layers_3_sigma_0p2_dropout_0p1
 latent_3072_layers_3_sigma_0p5_dropout_0p1
-latent_3072_layers_3_sigma_1_dropout_0p1
 ```
 
 Используются обычные training/validation настройки из `configs/denoiser.yaml`.
@@ -47,7 +46,7 @@ Runner проверяет архитектуру, dropout, `sigma`, source model
 provenance и SHA256 каждого checkpoint. Несовместимый checkpoint отклоняется до
 генерации.
 
-Для каждого сочетания из четырёх denoiser, четырёх векторов и четырёх alpha
+Для каждого сочетания из трёх denoiser, четырёх векторов и четырёх alpha
 используются одни и те же 100 стратифицированных AG News prompts: первые 24
 GPT-2 токена статьи. Генерируются 40 новых токенов. На каждом шаге:
 
@@ -59,8 +58,8 @@ GPT-2 токена статьи. Генерируются 40 новых токе
 5. десять отображаемых диагностик и длины steering-проекции до/после denoiser
    прикрепляются к предсказанному на этом шаге токену.
 
-Полный запуск содержит 64 условия, 6 400 генераций, 256 000 диагностированных
-token hidden states и 5 120 000 MC-предсказаний denoiser. Условия сохраняются
+Полный запуск содержит 48 условий, 4 800 генераций, 192 000 диагностированных
+token hidden states и 3 840 000 MC-предсказаний denoiser. Условия сохраняются
 раздельно и поддерживают resume. Быстрый smoke-вариант:
 
 ```bash
@@ -155,7 +154,7 @@ run/
 └── manifest.json
 ```
 
-Каждый график содержит четыре панели по `sigma`; линии соответствуют четырём
+Каждый график содержит три панели по `sigma`; линии соответствуют четырём
 steering-векторам. Для `steering_projection_removal` ось X показывает фактическую
 норму смещения `alpha · ||v||₂`, для остальных метрик — `alpha`. Полупрозрачная
 область показывает межквартильный диапазон токенных значений. Общий диапазон

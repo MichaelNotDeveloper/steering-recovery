@@ -64,8 +64,8 @@ flowchart LR
     A["Streaming OpenWebText"] --> B["GPT-2 teacher-forced forward"]
     B --> C["IterableDataset: exact k hidden states"]
     C --> D["Normalize once"]
-    D --> E["Shared epsilon; sigma 0.1 / 0.2 / 0.5 / 1.0"]
-    E --> J["36 residual MLP models in lockstep"]
+    D --> E["Shared epsilon; sigma 0.1 / 0.2 / 0.5"]
+    E --> J["27 residual MLP models in lockstep"]
     B -. "optional" .-> I["Activation shards"]
     F["Prompts + steering vector"] --> G["Baseline generation"]
     J -->|"best model checkpoint"| G
@@ -150,9 +150,9 @@ teacher-forced extractor и останавливается ровно после
 Residual block состоит из
 `Linear(768, latent_dim) → GELU → Linear(latent_dim, 768) → Dropout(p)` и skip
 connection. Внутреннего LayerNorm нет; по умолчанию `p=0`, поэтому основной grid
-содержит 36 моделей:
+содержит 27 моделей:
 `latent_dim=[192,768,3072]`, `num_layers=[1,3,5]`,
-`sigma=[0.1,0.2,0.5,1.0]`.
+`sigma=[0.1,0.2,0.5]`.
 
 Validation выполняется каждые `training.validation_every_batches` батчей.
 Каждая модель имеет отдельную папку с `metrics.jsonl`, `summary.json`, лучшим

@@ -72,7 +72,7 @@ def test_denoising_score_metrics_require_positive_sigma():
         denoising_metrics(values, values, values, noise_std=0.0)
 
 
-@pytest.mark.parametrize("sigma", [0.1, 0.2, 0.5, 1.0])
+@pytest.mark.parametrize("sigma", [0.1, 0.2, 0.5])
 def test_score_normalization_cancels_explicit_sigma_squared(sigma):
     clean = torch.zeros(1, 2)
     noisy = torch.zeros(1, 2)

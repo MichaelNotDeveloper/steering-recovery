@@ -115,6 +115,9 @@ methods:
   - name: denoiser_sigma_0p5
     intervention_mode: every_step
     denoiser_checkpoint: /path/to/latent_3072_layers_5_sigma_0p5/best.pt
+  - name: denoiser_sigma_1
+    intervention_mode: every_step
+    denoiser_checkpoint: /path/to/latent_3072_layers_5_sigma_1/best.pt
 ```
 
 Имя метода должно быть уникальным и filesystem-safe. Checkpoint загружается

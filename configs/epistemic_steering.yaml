@@ -32,6 +32,8 @@ denoisers:
     model_directory: latent_3072_layers_3_sigma_0p2_dropout_0p1
   - sigma: 0.5
     model_directory: latent_3072_layers_3_sigma_0p5_dropout_0p1
+  - sigma: 1.0
+    model_directory: latent_3072_layers_3_sigma_1_dropout_0p1
 
 alphas: [6.0, 8.0, 10.0, 20.0]
 

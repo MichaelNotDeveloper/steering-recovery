@@ -16,12 +16,12 @@ def test_all_primary_configs_compose():
         epistemic = compose(config_name="epistemic_steering")
     assert list(denoiser.model.latent_dims) == [192, 768, 3072]
     assert list(denoiser.model.num_layers) == [1, 3, 5]
-    assert list(denoiser.model.sigmas) == [0.1, 0.2, 0.5]
+    assert list(denoiser.model.sigmas) == [0.1, 0.2, 0.5, 1.0]
     assert (
         len(denoiser.model.latent_dims)
         * len(denoiser.model.num_layers)
         * len(denoiser.model.sigmas)
-        == 27
+        == 36
     )
     assert denoiser.data.mode == "streaming"
     assert denoiser.data.streaming.dataset_name == "Skylion007/openwebtext"
@@ -63,7 +63,10 @@ def test_all_primary_configs_compose():
     assert list(epistemic.alphas) == [6.0, 8.0, 10.0, 20.0]
     assert epistemic.mc_dropout.samples == 20
     assert epistemic.mc_dropout.expected_dropout == 0.1
-    assert [item.sigma for item in epistemic.denoisers] == [0.1, 0.2, 0.5]
+    assert [item.sigma for item in epistemic.denoisers] == [0.1, 0.2, 0.5, 1.0]
+    assert epistemic.denoisers[-1].model_directory.endswith(
+        "sigma_1_dropout_0p1"
+    )
 
 
 def test_sweep_config_registers_parameter_grid():
@@ -85,5 +88,5 @@ def test_epistemic_dropout_experiment_has_only_requested_models():
         )
     assert list(config.model.latent_dims) == [3072]
     assert list(config.model.num_layers) == [3]
-    assert list(config.model.sigmas) == [0.1, 0.2, 0.5]
+    assert list(config.model.sigmas) == [0.1, 0.2, 0.5, 1.0]
     assert config.model.dropout == 0.1

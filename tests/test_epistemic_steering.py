@@ -123,7 +123,7 @@ def test_epistemic_generation_records_one_mc_statistic_per_token():
 
 def _condition_rows():
     rows = []
-    for sigma in (0.1, 0.2, 0.5):
+    for sigma in (0.1, 0.2, 0.5, 1.0):
         for vector_index, vector_slug in enumerate(("world", "sports")):
             for alpha in (6.0, 8.0):
                 token_statistics = []
@@ -161,7 +161,7 @@ def _condition_rows():
 def test_epistemic_summary_plots_and_html(tmp_path):
     rows = _condition_rows()
     summaries = summarize_token_metrics(rows)
-    assert len(summaries) == 12
+    assert len(summaries) == 16
     assert all(summary["tokens"] == 3 for summary in summaries)
     plot_paths = plot_epistemic_summaries(
         summaries, tmp_path / "plots", formats=["png"], dpi=72

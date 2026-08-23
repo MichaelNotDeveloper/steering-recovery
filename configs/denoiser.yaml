@@ -36,7 +36,7 @@ model:
   # GPT hidden_size is fixed by the source; latent_dim is the MLP bottleneck.
   latent_dims: [192, 768, 3072]
   num_layers: [1, 3, 5]
-  sigmas: [0.1, 0.2, 0.5]
+  sigmas: [0.1, 0.2, 0.5, 1.0]
   # Applied after the second Linear in every residual branch.
   dropout: 0.0
 

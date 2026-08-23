@@ -47,8 +47,8 @@ python train_denoiser.py \
 
 `training.batch_size` — точное число hidden states, которое `IterableDataset`
 выдаёт за одну итерацию. Неполный остаток переносится между текстами.
-На каждом batch обучаются все 27 комбинаций
-`latent_dim=[192,768,3072] × num_layers=[1,3,5] × sigma=[0.1,0.2,0.5]`.
+На каждом batch обучаются все 36 комбинаций
+`latent_dim=[192,768,3072] × num_layers=[1,3,5] × sigma=[0.1,0.2,0.5,1.0]`.
 Без корректного `data.statistics_path` обучение завершится с ошибкой до первого
 optimizer step.
 
@@ -147,8 +147,8 @@ python train_denoiser.py experiment=epistemic_dropout
 python run_epistemic_steering.py denoiser_run_dir=/path/to/training/run
 ```
 
-Первый этап обучает три `3 × 3072` denoiser с `dropout=0.1` для
-`sigma=[0.1,0.2,0.5]`. Второй прогоняет каждый steered hidden 20 раз, сохраняет
+Первый этап обучает четыре `3 × 3072` denoiser с `dropout=0.1` для
+`sigma=[0.1,0.2,0.5,1.0]`. Второй прогоняет каждый steered hidden 20 раз, сохраняет
 восемь мер разброса и геометрии steering, строит графики и интерактивную
 токенную HTML-галерею.
 Подробности: [epistemic steering](docs/epistemic_steering.md).

@@ -1,10 +1,10 @@
 # @package _global_
 
-# Three FP32 denoisers for MC-dropout epistemic steering analysis.
+# Four FP32 denoisers for MC-dropout epistemic steering analysis.
 model:
   latent_dims: [3072]
   num_layers: [3]
-  sigmas: [0.1, 0.2, 0.5]
+  sigmas: [0.1, 0.2, 0.5, 1.0]
   dropout: 0.1
 
 wandb:

@@ -1,6 +1,6 @@
 # Steering Recovery
 
-Технический репорт находиться в [/report](./report)
+Технический репорт находиться в [/report/report.mp](./report/report.md)
 
 Воспроизводимый пайплайн для экспериментов с activation steering:
 

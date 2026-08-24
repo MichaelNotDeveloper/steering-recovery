@@ -2,6 +2,8 @@
 
 Технический репорт находиться в [/report/report.mp](./report/report.md)
 
+HF веса : [тут](https://huggingface.co/MeshaZa/steering-recovery-denoisers/tree/main)
+
 Воспроизводимый пайплайн для экспериментов с activation steering:
 
 - streaming teacher-forced hidden states из OpenWebText через GPT-2;

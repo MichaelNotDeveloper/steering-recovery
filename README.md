@@ -1,5 +1,7 @@
 # Steering Recovery
 
+Технический репорт находиться в [/report](./report)
+
 Воспроизводимый пайплайн для экспериментов с activation steering:
 
 - streaming teacher-forced hidden states из OpenWebText через GPT-2;
@@ -135,19 +137,31 @@ AG News](docs/topic_logistic_regression.md).
 python run_steering_benchmarks.py
 ```
 
-Для каждой пары «AG News-вектор × метод» строятся отдельные scatter-графики
-target-class probability против Dist-1, Dist-2, Dist-3 и SLOR на `gpt2-large`,
-а также интерактивная HTML-галерея примеров. Цвет кодирует `alpha`, вокруг точек
-показывается 95% bootstrap CI. Подробности и формат результатов:
-[документация по бенчмаркам](docs/steering_benchmarks.md). Формулы обычного,
-ортогонального и двух итеративных вариантов вынесены в описание
-[четырёх методов восстановления](docs/steering_recovery_methods.md).
+Для каждой пары «AG News-вектор × метод» строится scatter-график target-class
+probability против Dist-3 с интерактивной HTML-галереей примеров. Цвет кодирует
+`alpha`, а вокруг точек показывается 95% bootstrap CI. Подробности и формат результатов:
+[документация по бенчмаркам](docs/steering_benchmarks.md).
+
+MC-dropout эксперимент необычности steered hidden states:
+
+```bash
+python train_denoiser.py experiment=epistemic_dropout
+python run_epistemic_steering.py denoiser_run_dir=/path/to/training/run
+```
+
+Первый этап обучает три `3 × 3072` denoiser с `dropout=0.1` для
+`sigma=[0.1,0.2,0.5]`. Второй прогоняет каждый steered hidden 20 раз, сохраняет
+десять мер разброса и геометрии steering, строит графики и интерактивную
+токенную HTML-галерею. Отдельно оценивается Gaussian outlier probability
+steering-смещения по сохранённым `std` hidden states.
+Подробности: [epistemic steering](docs/epistemic_steering.md).
 
 Все параметры можно переопределять из CLI. Подробности: [архитектура](docs/architecture.md),
 [обучение denoiser](docs/denoiser_training.md) и
 [генерация steering-векторов](docs/steering_vectors.md),
 [классификаторы тем](docs/topic_logistic_regression.md),
-[бенчмарки steering](docs/steering_benchmarks.md).
+[бенчмарки steering](docs/steering_benchmarks.md),
+[MC-dropout epistemic steering](docs/epistemic_steering.md).
 
 ## Проверки
 
